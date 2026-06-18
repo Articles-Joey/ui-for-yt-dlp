@@ -11,7 +11,7 @@ Makes downloading videos and albums from YouTube and YouTube Music easier when u
 I have trust issues using repos from random people and most other tools used python. Also had way to much for me to audit.
 
 Why is this any different? 
-- This is backed by a real LLC via Articles Media, a company focused on Transparency. 
+- This is backed by a real LLC via Articles Media, a company focused on transparency. 
 - Built with no additional libs or packages, just bring your own yt-dlp and Node.js.
 - Minimal logic so easy to audit and see what is going on under the hood.
 
@@ -23,7 +23,7 @@ Why is this any different?
 
 ## Getting Started
 
-First, install this software, yt-dlp and Node.js
+First, install this software, yt-dlp, and Node.js
 
 https://github.com/yt-dlp/yt-dlp  
 https://nodejs.org/en/download  
@@ -48,6 +48,20 @@ node index.js
 Lastly install extension via chrome://extensions/ using Load unpacked and select the extension folder.
 
 Note: If you want to use npm run dev then nodemon must be installed globally.
+
+## Downloading Logic
+
+Will try and fetch the artist and album name to download the output to `${DOWNLOAD_PATH}/${artist}/${album}`
+
+## TODO
+
+- Expand download UI to YouTube, right now its only on music.youtube.com.
+- Logic to handle downloading music singles better.
+
+## Contributing
+
+- Keep commits small, multiple small commits > one big commit.
+- Please understand the code you commit! No slop or vibe coders. I got enough problems in my life with AI, I don't need yours! 😇
 
 ## Attributions
 
