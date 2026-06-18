@@ -1,0 +1,11 @@
+{
+  "name": "ui-for-yt-dlp",
+  "description": "",
+  "homepage": "https://github.com/Articles-Joey/ui-for-yt-dlp",
+  "version": "0.0.1",
+  "private": false,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  }
+}

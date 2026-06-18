@@ -1,0 +1,1 @@
+Simple server that takes requests from the extension and runs the needed yt-dlp command.

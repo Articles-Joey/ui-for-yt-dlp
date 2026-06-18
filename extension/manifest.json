@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "UI for yt-dlp",
+  "version": "1.0",
+  "description": "Adds download buttons to make using yt-dlp easier.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://music.youtube.com/playlist*",
+        "https://www.youtube.com/watch?v=*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
