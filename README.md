@@ -57,6 +57,7 @@ Will try and fetch the artist and album name to download the output to `${DOWNLO
 
 - Expand download UI to YouTube, right now its only on music.youtube.com.
 - Logic to handle downloading music singles better.
+- Logic and UI to check if album/songs already downloaded.
 
 ## Contributing
 
