@@ -1,8 +1,17 @@
 (() => {
+  const BUTTON_ROW_ID = 'ytm-button-row';
   const BUTTON_ID = 'ytm-placeholder-button';
   let ENDPOINT = 'http://localhost:3060/download';
   const INFO_BUTTON_ID = 'ytm-info-button';
   let INFO_LINK = 'https://github.com/Articles-Joey/ui-for-yt-dlp';
+
+  function isYouTubeMusic() {
+    return location.hostname === 'music.youtube.com';
+  }
+
+  function isYouTube() {
+    return location.hostname === 'www.youtube.com' || location.hostname === 'youtube.com';
+  }
 
   // Fetch runtime config from local server to centralize editable values
   (async function fetchConfig() {
@@ -19,9 +28,11 @@
 
   function createButtonRow() {
     const wrap = document.createElement('div');
+    wrap.id = BUTTON_ROW_ID;
     wrap.style.display = 'flex';
     wrap.style.gap = '8px';
     wrap.style.marginTop = '16px';
+    wrap.style.marginBottom = '16px';
 
     const btn = document.createElement('button');
     btn.id = BUTTON_ID;
@@ -87,7 +98,7 @@
         setTimeout(() => (btn.textContent = original), 1500);
       } catch (e) {
         btn.textContent = 'Error';
-        setTimeout(() => (btn.textContent = 'Placeholder'), 2000);
+        setTimeout(() => (btn.textContent = 'Error'), 2000);
       } finally {
         btn.disabled = false;
       }
@@ -113,27 +124,99 @@
     return true;
   }
 
-  let lastUrl = location.href;
-  let scheduled = false;
+  function insertAfterTitle() {
+    const container = document.getElementById('description-inner');
+    if (!container) return false;
 
-  function scheduleInsert() {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
-      insertAfterActionButtons();
-    });
+    let btn = document.getElementById(BUTTON_ID);
+    if (!btn) {
+      const row = createButtonRow();
+      container.insertBefore(row, container.firstChild);
+      btn = document.getElementById(BUTTON_ID);
+    }
+
+    attachClickHandler(btn);
+    const info = document.getElementById(INFO_BUTTON_ID);
+    if (info && !info.dataset.handlerAttached) {
+      info.dataset.handlerAttached = '1';
+      info.addEventListener('click', () => window.open(INFO_LINK, '_blank'));
+    }
+    return true;
+  }
+
+  function insertButtons() {
+    if (isYouTubeMusic()) return insertAfterActionButtons();
+    if (isYouTube()) return insertAfterTitle();
+    return false;
+  }
+
+  function hasYouTubeInfoElement() {
+    return Boolean(document.getElementById('description-inner'));
+  }
+
+  let lastUrl = location.href;
+  let insertTimer = null;
+  let youtubePollTimer = null;
+
+  function stopYouTubeInfoPolling() {
+    if (!youtubePollTimer) return;
+    clearInterval(youtubePollTimer);
+    youtubePollTimer = null;
+  }
+
+  function startYouTubeInfoPolling() {
+    stopYouTubeInfoPolling();
+    const urlAtStart = location.href;
+
+    youtubePollTimer = setInterval(() => {
+
+      console.log('Polling for YouTube info element...');
+
+      if (location.href !== urlAtStart || !isYouTube()) {
+        console.log('URL changed or not YouTube, stopping polling.');
+        stopYouTubeInfoPolling();
+        return;
+      }
+
+      if (!hasYouTubeInfoElement()) {
+        console.log('YouTube info element not found, continuing to poll...');
+        return;
+      };
+
+      if (insertAfterTitle()) {
+        console.log('YouTube info element found, stopping polling.');
+        stopYouTubeInfoPolling();
+      }
+
+    }, 1000);
+  }
+
+  function queueInsertAfterUrlChange() {
+    if (insertTimer) clearTimeout(insertTimer);
+    stopYouTubeInfoPolling();
+
+    if (isYouTube()) {
+
+      setTimeout(() => {
+        // if (location.href !== lastUrl) return;
+        startYouTubeInfoPolling();
+      }, 5000);
+
+      return;
+    }
+
+    const urlAtSchedule = location.href;
+    insertTimer = setTimeout(() => {
+      if (location.href !== urlAtSchedule) return;
+      insertButtons();
+    }, 2000);
   }
 
   function handleLocationChange() {
     if (location.href === lastUrl) return;
+    console.log('Location changed:', location.href);
     lastUrl = location.href;
-
-    // SPA route changes often render asynchronously; retry shortly after navigation.
-    scheduleInsert();
-    setTimeout(scheduleInsert, 100);
-    setTimeout(scheduleInsert, 400);
-    setTimeout(scheduleInsert, 1200);
+    queueInsertAfterUrlChange();
   }
 
   const originalPushState = history.pushState;
@@ -154,19 +237,15 @@
   window.addEventListener('hashchange', () => window.dispatchEvent(new Event('ytm:locationchange')));
   window.addEventListener('ytm:locationchange', handleLocationChange);
 
-  // Try inserting immediately.
-  scheduleInsert();
+  // Run once for the initially loaded URL.
+  if (!isYouTube()) {
+    queueInsertAfterUrlChange();
+  }
 
-  // Observe DOM changes to handle async SPA rendering.
-  const observer = new MutationObserver(() => {
-    handleLocationChange();
-    scheduleInsert();
-  });
-  observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
-
-  // Short grace period for late-rendered controls.
-  let tries = 0;
-  const interval = setInterval(() => {
-    if (insertAfterActionButtons() || ++tries > 1) clearInterval(interval);
-  }, 500);
+  if (isYouTube()) {
+    setTimeout(() => {
+      queueInsertAfterUrlChange();
+    }, 1000);
+  }
+  
 })();
