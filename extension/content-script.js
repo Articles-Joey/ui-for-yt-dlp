@@ -2,7 +2,7 @@
   const BUTTON_ID = 'ytm-placeholder-button';
   let ENDPOINT = 'http://localhost:3060/download';
   const INFO_BUTTON_ID = 'ytm-info-button';
-  let INFO_LINK = 'https://example.com';
+  let INFO_LINK = 'https://github.com/Articles-Joey/ui-for-yt-dlp';
 
   // Fetch runtime config from local server to centralize editable values
   (async function fetchConfig() {
@@ -113,16 +113,60 @@
     return true;
   }
 
-  // Try inserting immediately
-  insertAfterActionButtons();
+  let lastUrl = location.href;
+  let scheduled = false;
 
-  // Observe DOM changes to handle SPA navigation
-  const observer = new MutationObserver(() => insertAfterActionButtons());
+  function scheduleInsert() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      insertAfterActionButtons();
+    });
+  }
+
+  function handleLocationChange() {
+    if (location.href === lastUrl) return;
+    lastUrl = location.href;
+
+    // SPA route changes often render asynchronously; retry shortly after navigation.
+    scheduleInsert();
+    setTimeout(scheduleInsert, 100);
+    setTimeout(scheduleInsert, 400);
+    setTimeout(scheduleInsert, 1200);
+  }
+
+  const originalPushState = history.pushState;
+  history.pushState = function (...args) {
+    const result = originalPushState.apply(this, args);
+    window.dispatchEvent(new Event('ytm:locationchange'));
+    return result;
+  };
+
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function (...args) {
+    const result = originalReplaceState.apply(this, args);
+    window.dispatchEvent(new Event('ytm:locationchange'));
+    return result;
+  };
+
+  window.addEventListener('popstate', () => window.dispatchEvent(new Event('ytm:locationchange')));
+  window.addEventListener('hashchange', () => window.dispatchEvent(new Event('ytm:locationchange')));
+  window.addEventListener('ytm:locationchange', handleLocationChange);
+
+  // Try inserting immediately.
+  scheduleInsert();
+
+  // Observe DOM changes to handle async SPA rendering.
+  const observer = new MutationObserver(() => {
+    handleLocationChange();
+    scheduleInsert();
+  });
   observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
 
-  // Also run periodically for a short grace period in case mutations miss it
+  // Short grace period for late-rendered controls.
   let tries = 0;
   const interval = setInterval(() => {
-    if (insertAfterActionButtons() || ++tries > 20) clearInterval(interval);
+    if (insertAfterActionButtons() || ++tries > 1) clearInterval(interval);
   }, 500);
 })();

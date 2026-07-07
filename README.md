@@ -19,7 +19,7 @@ Why is this any different?
 
 - Only use this tool to download content you own! Even though Google can steal whatever content they want from you to train their AI, you can not steal content from them or others!
 
-- This was tested on 2026-06-17 with yt-dlp 2026.06.09. YouTube breaks UI regularly so may not work if this project has not been updated in a while.
+- This was tested on 2026-07-07 with yt-dlp 2026.06.09. YouTube breaks UI regularly so may not work if this project has not been updated in a while.
 
 ## Getting Started
 

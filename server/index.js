@@ -29,7 +29,7 @@ const server = http.createServer((req, res) => {
     // Expose minimal config for the extension to consume
     const cfg = {
       endpoint: `http://localhost:${PORT}/download`,
-      infoLink: projectConfig.INFO_LINK || 'https://example.com'
+      infoLink: projectConfig.INFO_LINK || 'https://github.com/Articles-Joey/ui-for-yt-dlp'
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(cfg));
