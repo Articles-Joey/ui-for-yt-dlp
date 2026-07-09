@@ -8,6 +8,35 @@ const projectConfig = require('../config');
 const PORT = projectConfig.PORT || 3060;
 const YTDLP_PATH = projectConfig.YTDLP_PATH || 'D:\\Videos\\yt-dlp\\yt-dlp.exe';
 const DOWNLOAD_PATH = projectConfig.DOWNLOAD_PATH || 'D:\\Music';
+const DEFAULT_YTDLP_PARAMS = {
+  'sleep-requests': 1,
+  'sleep-interval': 1,
+  'max-sleep-interval': 3
+};
+
+function toYtDlpArgsFromObject(params = {}) {
+  const args = [];
+
+  Object.entries(params).forEach(([rawKey, rawValue]) => {
+    if (rawValue === undefined || rawValue === null || rawValue === false) {
+      return;
+    }
+
+    const key = String(rawKey).replace(/^--/, '');
+    if (!key) {
+      return;
+    }
+
+    args.push(`--${key}`);
+
+    // For boolean true flags we only include the switch itself.
+    if (rawValue !== true) {
+      args.push(String(rawValue));
+    }
+  });
+
+  return args;
+}
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -58,7 +87,9 @@ const server = http.createServer((req, res) => {
           await fs.promises.mkdir(targetDir, { recursive: true });
 
           // Build yt-dlp args safely (avoid shell interpolation)
-          const args = ['-P', targetDir, url];
+          const mergedParams = Object.assign({}, DEFAULT_YTDLP_PARAMS, projectConfig.YTDLP_PARAMS || {}, data.params || {});
+          const extraArgs = toYtDlpArgsFromObject(mergedParams);
+          const args = ['-P', targetDir, ...extraArgs, url];
 
           console.log('[download] spawning:', YTDLP_PATH, args);
 
@@ -67,7 +98,7 @@ const server = http.createServer((req, res) => {
           if (process.platform === 'win32') {
             // Use cmd.exe start to open a new terminal window per request so output is visible and non-blocking
             // 'start' treats the first quoted string as window title, so pass an empty title "".
-            const startArgs = ['/c', 'start', '""', YTDLP_PATH, '-P', targetDir, url];
+            const startArgs = ['/c', 'start', '""', YTDLP_PATH, ...args];
             const child = spawn('cmd.exe', startArgs, { detached: true, stdio: 'ignore' });
             child.unref();
             childInfo = { forwarded: true, terminal: 'windows', pid: child.pid };
@@ -79,7 +110,7 @@ const server = http.createServer((req, res) => {
           }
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(Object.assign({ status: 'ok', cmd: `${YTDLP_PATH} -P ${author}/${name} ${url}` }, childInfo)));
+          res.end(JSON.stringify(Object.assign({ status: 'ok', cmd: `${YTDLP_PATH} ${args.map(v => JSON.stringify(v)).join(' ')}` }, childInfo)));
         } catch (err) {
           console.warn('Failed to handle download', err);
           res.writeHead(500, { 'Content-Type': 'application/json' });

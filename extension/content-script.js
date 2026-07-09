@@ -150,6 +150,18 @@
     return false;
   }
 
+  function handleManualInjectRequest() {
+    if (insertButtons()) return true;
+
+    // YouTube watch pages often render late in SPA navigation.
+    if (isYouTube()) {
+      startYouTubeInfoPolling();
+      return true;
+    }
+
+    return false;
+  }
+
   function hasYouTubeInfoElement() {
     return Boolean(document.getElementById('description-inner'));
   }
@@ -236,6 +248,12 @@
   window.addEventListener('popstate', () => window.dispatchEvent(new Event('ytm:locationchange')));
   window.addEventListener('hashchange', () => window.dispatchEvent(new Event('ytm:locationchange')));
   window.addEventListener('ytm:locationchange', handleLocationChange);
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || message.type !== 'ytm:inject-buttons') return;
+    const queued = handleManualInjectRequest();
+    sendResponse({ ok: queued });
+  });
 
   // Run once for the initially loaded URL.
   if (!isYouTube()) {

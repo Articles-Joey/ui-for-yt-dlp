@@ -6,6 +6,8 @@ Yet another yt-dlp tool that will be buried in the endless sea of shit and slop.
 
 Makes downloading videos and albums from YouTube and YouTube Music easier when using yt-dlp. Super minimal Chrome extension that pairs with a local server to handle downloads.
 
+If buttons fail to appear after navigation, click the extension icon while on a supported page to manually inject them.
+
 ## Why?
 
 I have trust issues using repos from random people and most other tools used python. Also had way to much for me to audit.
