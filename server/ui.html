@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>yt-dlp Server UI</title>
+    <style>
+        :root {
+            --bg: #0f1217;
+            --panel: #171c24;
+            --text: #e8edf5;
+            --muted: #a7b4c6;
+            --accent: #f9edcd;
+            --accent-2: #adafb3;
+            --border: #2a3240;
+            --danger: #ff7272;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Segoe UI, Tahoma, sans-serif;
+            background: radial-gradient(1200px 800px at 10% -20%, #f9edcd6b 0%, var(--bg) 45%);
+            color: var(--text);
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 20px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 720px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            /* border-radius: 14px; */
+            padding: 18px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            margin: 0 0 18px;
+            margin-bottom: 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .row {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        @media (min-width: 720px) {
+            .row.two {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        input[type="text"],
+        textarea {
+            width: 100%;
+            background: #0f141b;
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 10px;
+            outline: none;
+        }
+
+        input[type="text"]:focus,
+        textarea:focus {
+            border-color: var(--accent);
+        }
+
+        textarea {
+            min-height: 90px;
+            resize: vertical;
+        }
+
+        .checks {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            margin: 8px 0 14px;
+        }
+
+        .checks label {
+            margin: 0;
+            color: var(--text);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        button {
+            border: 1px solid transparent;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #06121d;
+            background: var(--accent);
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            background: transparent;
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        button.quick {
+            background: var(--accent-2);
+        }
+
+        button:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 14px;
+            white-space: pre-wrap;
+            font-size: 13px;
+            color: var(--muted);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            background: #101722;
+        }
+
+        .status.error {
+            border-color: #5a2a2a;
+            color: #ffbaba;
+        }
+    </style>
+</head>
+
+<body>
+    <main class="card">
+
+        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+
+            <img width="64" height="64" src="icon_128.png" style="margin-right: 1rem;" />
+
+            <div>
+                <h1>yt-dlp Server UI</h1>
+                <p class="subtitle">Use this page to trigger downloads directly without the browser extension.</p>
+            </div>
+
+        </div>
+
+        <div class="row">
+            <div>
+                <label for="videoId">Video ID</label>
+                <input id="videoId" type="text" placeholder="dQw4w9WgXcQ" />
+            </div>
+        </div>
+
+        <div class="row two">
+            <div>
+                <label for="author">Author (optional)</label>
+                <input id="author" type="text" placeholder="Artist name" />
+            </div>
+            <div>
+                <label for="name">Name (optional, defaults to Video ID)</label>
+                <input id="name" type="text" placeholder="Track or album name" />
+            </div>
+        </div>
+
+        <div class="checks">
+            <label><input id="isSingle" type="checkbox" /> Is Single</label>
+            <label><input id="extractMp3" type="checkbox" /> Extract MP3</label>
+        </div>
+
+        <div class="row">
+            <div>
+                <label for="customParams">Custom Params JSON (optional)</label>
+                <textarea id="customParams" placeholder='{"format":"bestaudio"}'></textarea>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="downloadBtn">Download</button>
+            <button id="downloadMp3Btn" class="quick">Quick Action: Download MP3</button>
+            <button id="clearBtn" class="secondary">Clear</button>
+        </div>
+
+        <div id="status" class="status">Ready.</div>
+    </main>
+
+    <script>
+        const videoIdEl = document.getElementById('videoId');
+        const authorEl = document.getElementById('author');
+        const nameEl = document.getElementById('name');
+        const isSingleEl = document.getElementById('isSingle');
+        const extractMp3El = document.getElementById('extractMp3');
+        const customParamsEl = document.getElementById('customParams');
+        const statusEl = document.getElementById('status');
+
+        const downloadBtn = document.getElementById('downloadBtn');
+        const downloadMp3Btn = document.getElementById('downloadMp3Btn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        function setStatus(text, isError) {
+            statusEl.textContent = text;
+            statusEl.classList.toggle('error', Boolean(isError));
+        }
+
+        function parseCustomParams() {
+            const text = customParamsEl.value.trim();
+            if (!text) return {};
+            const parsed = JSON.parse(text);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('Custom params must be a JSON object');
+            }
+            return parsed;
+        }
+
+        function buildPayload(forceMp3) {
+            const videoId = videoIdEl.value.trim();
+            if (!videoId) {
+                throw new Error('Video ID is required');
+            }
+
+            const params = parseCustomParams();
+            const shouldExtractMp3 = forceMp3 || extractMp3El.checked;
+            if (shouldExtractMp3) {
+                params['extract-audio'] = true;
+                params['audio-format'] = 'mp3';
+            }
+
+            const payload = {
+                url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+                name: nameEl.value.trim() || videoId
+            };
+
+            const author = authorEl.value.trim();
+            if (author) payload.author = author;
+            if (isSingleEl.checked) payload.isSingle = true;
+            if (Object.keys(params).length) payload.params = params;
+
+            return payload;
+        }
+
+        async function sendDownload(forceMp3) {
+            downloadBtn.disabled = true;
+            downloadMp3Btn.disabled = true;
+
+            try {
+                const payload = buildPayload(forceMp3);
+                setStatus(`Sending: ${payload.url}`);
+
+                const resp = await fetch('/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    throw new Error(data.error || `HTTP ${resp.status}`);
+                }
+
+                setStatus(`Queued successfully.\n\nCommand:\n${data.cmd || 'n/a'}`);
+            } catch (err) {
+                setStatus(`Error: ${err.message || String(err)}`, true);
+            } finally {
+                downloadBtn.disabled = false;
+                downloadMp3Btn.disabled = false;
+            }
+        }
+
+        downloadBtn.addEventListener('click', () => sendDownload(false));
+        downloadMp3Btn.addEventListener('click', () => sendDownload(true));
+
+        clearBtn.addEventListener('click', () => {
+            videoIdEl.value = '';
+            authorEl.value = '';
+            nameEl.value = '';
+            isSingleEl.checked = false;
+            extractMp3El.checked = false;
+            customParamsEl.value = '';
+            setStatus('Ready.');
+            videoIdEl.focus();
+        });
+    </script>
+</body>
+
+</html>

@@ -8,6 +8,8 @@ const projectConfig = require('../config');
 const PORT = projectConfig.PORT || 3060;
 const YTDLP_PATH = projectConfig.YTDLP_PATH || 'D:\\Videos\\yt-dlp\\yt-dlp.exe';
 const DOWNLOAD_PATH = projectConfig.DOWNLOAD_PATH || 'D:\\Music';
+const UI_HTML_PATH = path.join(__dirname, 'ui.html');
+const ICON_128_PATH = path.join(__dirname, '..', 'extension', 'icons', 'icon_128.png');
 const DEFAULT_YTDLP_PARAMS = {
   'sleep-requests': 1,
   'sleep-interval': 1,
@@ -81,6 +83,21 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
+  if (req.method === 'GET' && req.url === '/') {
+    fs.readFile(UI_HTML_PATH, 'utf8', (err, html) => {
+      if (err) {
+        console.warn('Failed to load server UI HTML', err);
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Failed to load UI');
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+    });
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/config') {
     // Expose minimal config for the extension to consume
     const cfg = {
@@ -91,6 +108,24 @@ const server = http.createServer((req, res) => {
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(cfg));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/icon_128.png') {
+    fs.readFile(ICON_128_PATH, (err, iconBuffer) => {
+      if (err) {
+        console.warn('Failed to load icon file', err);
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Icon not found');
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=86400'
+      });
+      res.end(iconBuffer);
+    });
     return;
   }
 
