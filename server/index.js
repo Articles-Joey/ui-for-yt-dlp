@@ -38,9 +38,17 @@ function toYtDlpArgsFromObject(params = {}) {
   return args;
 }
 
+function sanitizeName(s) {
+  return (s || '')
+    .toString()
+    .trim()
+    .replace(/[<>:\\"\/\\|\?\*\x00-\x1F]/g, '_')
+    .replace(/\.+$/g, '') || 'unknown';
+}
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Max-Age': '86400'
 };
@@ -58,10 +66,65 @@ const server = http.createServer((req, res) => {
     // Expose minimal config for the extension to consume
     const cfg = {
       endpoint: `http://localhost:${PORT}/download`,
+      checkEndpoint: `http://localhost:${PORT}/check`,
+      openPathEndpoint: `http://localhost:${PORT}/open-path`,
       infoLink: projectConfig.INFO_LINK || 'https://github.com/Articles-Joey/ui-for-yt-dlp'
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(cfg));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/check')) {
+    try {
+      const parsed = new URL(req.url, `http://localhost:${PORT}`);
+      const author = sanitizeName(parsed.searchParams.get('author'));
+      const name = sanitizeName(parsed.searchParams.get('name'));
+      const targetDir = path.join(DOWNLOAD_PATH, author, name);
+      const exists = fs.existsSync(targetDir);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name }));
+    } catch (err) {
+      console.warn('Failed to check existing path', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'error', error: String(err) }));
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/open-path')) {
+    try {
+      const parsed = new URL(req.url, `http://localhost:${PORT}`);
+      const author = sanitizeName(parsed.searchParams.get('author'));
+      const name = sanitizeName(parsed.searchParams.get('name'));
+      const targetDir = path.join(DOWNLOAD_PATH, author, name);
+      const exists = fs.existsSync(targetDir);
+
+      if (!exists) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'error', error: 'Path does not exist', path: targetDir }));
+        return;
+      }
+
+      if (process.platform === 'win32') {
+        const child = spawn('explorer.exe', [targetDir], { detached: true, stdio: 'ignore' });
+        child.unref();
+      } else if (process.platform === 'darwin') {
+        const child = spawn('open', [targetDir], { detached: true, stdio: 'ignore' });
+        child.unref();
+      } else {
+        const child = spawn('xdg-open', [targetDir], { detached: true, stdio: 'ignore' });
+        child.unref();
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name }));
+    } catch (err) {
+      console.warn('Failed to open path', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'error', error: String(err) }));
+    }
     return;
   }
 
@@ -77,15 +140,8 @@ const server = http.createServer((req, res) => {
           const authorRaw = data.author || null;
           const url = data.url || '';
           const nameRaw = data.name || null;
-
-          const sanitize = s =>
-            (s || '')
-              .toString()
-              .trim()
-              .replace(/[<>:\\"\/\\|\?\*\x00-\x1F]/g, '_')
-              .replace(/\.+$/g, '') || 'unknown';
-          const author = authorRaw ? sanitize(authorRaw) : 'unknown';
-          const name = nameRaw ? sanitize(nameRaw) : 'unknown';
+          const author = authorRaw ? sanitizeName(authorRaw) : 'unknown';
+          const name = nameRaw ? sanitizeName(nameRaw) : 'unknown';
 
           // Construct target directory and ensure it exists
           const targetDir = path.join(DOWNLOAD_PATH, author, name);
