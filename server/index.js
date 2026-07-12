@@ -78,7 +78,12 @@ const server = http.createServer((req, res) => {
           const url = data.url || '';
           const nameRaw = data.name || null;
 
-          const sanitize = s => (s || '').toString().trim().replace(/[<>:\\"\/\\|\?\*\x00-\x1F]/g, '_') || 'unknown';
+          const sanitize = s =>
+            (s || '')
+              .toString()
+              .trim()
+              .replace(/[<>:\\"\/\\|\?\*\x00-\x1F]/g, '_')
+              .replace(/\.+$/g, '') || 'unknown';
           const author = authorRaw ? sanitize(authorRaw) : 'unknown';
           const name = nameRaw ? sanitize(nameRaw) : 'unknown';
 
