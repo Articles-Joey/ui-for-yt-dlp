@@ -46,6 +46,25 @@ function sanitizeName(s) {
     .replace(/\.+$/g, '') || 'unknown';
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return false;
+  return value.toLowerCase() === 'true' || value === '1';
+}
+
+function resolveTargetDir({ authorRaw, nameRaw, isSingle }) {
+  const hasAuthor = Boolean(authorRaw && String(authorRaw).trim());
+  const author = hasAuthor ? sanitizeName(authorRaw) : 'unknown';
+  const name = nameRaw ? sanitizeName(nameRaw) : 'unknown';
+
+  // Singles are grouped under artist/Singles unless artist is unknown.
+  if (isSingle && hasAuthor) {
+    return { author, name, targetDir: path.join(DOWNLOAD_PATH, author, 'Singles') };
+  }
+
+  return { author, name, targetDir: path.join(DOWNLOAD_PATH, author, name) };
+}
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -78,13 +97,16 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/check')) {
     try {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
-      const author = sanitizeName(parsed.searchParams.get('author'));
-      const name = sanitizeName(parsed.searchParams.get('name'));
-      const targetDir = path.join(DOWNLOAD_PATH, author, name);
+      const isSingle = parseBoolean(parsed.searchParams.get('isSingle'));
+      const { author, name, targetDir } = resolveTargetDir({
+        authorRaw: parsed.searchParams.get('author'),
+        nameRaw: parsed.searchParams.get('name'),
+        isSingle
+      });
       const exists = fs.existsSync(targetDir);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name }));
+      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name, isSingle }));
     } catch (err) {
       console.warn('Failed to check existing path', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -96,9 +118,12 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/open-path')) {
     try {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
-      const author = sanitizeName(parsed.searchParams.get('author'));
-      const name = sanitizeName(parsed.searchParams.get('name'));
-      const targetDir = path.join(DOWNLOAD_PATH, author, name);
+      const isSingle = parseBoolean(parsed.searchParams.get('isSingle'));
+      const { author, name, targetDir } = resolveTargetDir({
+        authorRaw: parsed.searchParams.get('author'),
+        nameRaw: parsed.searchParams.get('name'),
+        isSingle
+      });
       const exists = fs.existsSync(targetDir);
 
       if (!exists) {
@@ -119,7 +144,7 @@ const server = http.createServer((req, res) => {
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name }));
+      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name, isSingle }));
     } catch (err) {
       console.warn('Failed to open path', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -140,11 +165,10 @@ const server = http.createServer((req, res) => {
           const authorRaw = data.author || null;
           const url = data.url || '';
           const nameRaw = data.name || null;
-          const author = authorRaw ? sanitizeName(authorRaw) : 'unknown';
-          const name = nameRaw ? sanitizeName(nameRaw) : 'unknown';
+          const isSingle = Boolean(data.isSingle);
+          const { author, name, targetDir } = resolveTargetDir({ authorRaw, nameRaw, isSingle });
 
           // Construct target directory and ensure it exists
-          const targetDir = path.join(DOWNLOAD_PATH, author, name);
           await fs.promises.mkdir(targetDir, { recursive: true });
 
           // Build yt-dlp args safely (avoid shell interpolation)

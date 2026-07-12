@@ -111,6 +111,7 @@
     const params = new URLSearchParams();
     params.set('author', payload.author || 'unknown');
     params.set('name', payload.name || 'unknown');
+    params.set('isSingle', payload.isSingle ? 'true' : 'false');
 
     const resp = await fetch(`${CHECK_ENDPOINT}?${params.toString()}`);
     if (!resp.ok) throw new Error('Non-OK response: ' + resp.status);
@@ -121,6 +122,7 @@
     const params = new URLSearchParams();
     params.set('author', payload.author || 'unknown');
     params.set('name', payload.name || 'unknown');
+    params.set('isSingle', payload.isSingle ? 'true' : 'false');
 
     const resp = await fetch(`${OPEN_PATH_ENDPOINT}?${params.toString()}`);
     if (!resp.ok) throw new Error('Non-OK response: ' + resp.status);
@@ -187,6 +189,7 @@
         btn.textContent = 'Sending...';
 
         const payload = gatherData();
+        if (result.isSingle) payload.isSingle = true;
         if (params) payload.params = params;
 
         await sendDownload(payload);
@@ -204,6 +207,8 @@
 
   function showMoreOptionsModal() {
     return new Promise(resolve => {
+      let isSingle = false;
+
       const overlay = document.createElement('div');
       overlay.style.position = 'fixed';
       overlay.style.inset = '0';
@@ -240,11 +245,18 @@
       const quickActionsWrap = document.createElement('div');
       quickActionsWrap.style.marginBottom = '12px';
 
+      const toggleSingleQuickAction = document.createElement('button');
+      toggleSingleQuickAction.type = 'button';
+      toggleSingleQuickAction.textContent = 'Toggle Is Single: Off';
+      toggleSingleQuickAction.style.padding = '8px 10px';
+      toggleSingleQuickAction.style.cursor = 'pointer';
+
       const mp3QuickAction = document.createElement('button');
       mp3QuickAction.type = 'button';
       mp3QuickAction.textContent = 'Extract audio as MP3';
       mp3QuickAction.style.padding = '8px 10px';
       mp3QuickAction.style.cursor = 'pointer';
+      mp3QuickAction.style.marginLeft = '8px';
 
       const checkExistingQuickAction = document.createElement('button');
       checkExistingQuickAction.type = 'button';
@@ -312,8 +324,12 @@
       });
 
       cancelBtn.addEventListener('click', () => close({ action: 'cancel' }));
-      sendBtn.addEventListener('click', () => close({ action: 'custom', customParamsText: customInput.value }));
-      mp3QuickAction.addEventListener('click', () => close({ action: 'quick-mp3' }));
+      sendBtn.addEventListener('click', () => close({ action: 'custom', customParamsText: customInput.value, isSingle }));
+      mp3QuickAction.addEventListener('click', () => close({ action: 'quick-mp3', isSingle }));
+      toggleSingleQuickAction.addEventListener('click', () => {
+        isSingle = !isSingle;
+        toggleSingleQuickAction.textContent = `Toggle Is Single: ${isSingle ? 'On' : 'Off'}`;
+      });
       checkExistingQuickAction.addEventListener('click', async () => {
         const originalText = checkExistingQuickAction.textContent;
         quickActionStatus.textContent = '';
@@ -322,6 +338,7 @@
 
         try {
           const payload = gatherData();
+          if (isSingle) payload.isSingle = true;
           const check = await checkExistingPath(payload);
           quickActionStatus.textContent = '';
 
@@ -364,6 +381,7 @@
         }
       });
 
+      quickActionsWrap.appendChild(toggleSingleQuickAction);
       quickActionsWrap.appendChild(mp3QuickAction);
       quickActionsWrap.appendChild(checkExistingQuickAction);
       quickActionsWrap.appendChild(quickActionStatus);

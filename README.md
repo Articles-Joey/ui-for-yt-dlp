@@ -57,7 +57,7 @@ Will try and fetch the artist and album name to download the output to `${DOWNLO
 
 ## TODO
 
-- UI toggle logic to handle downloading music singles better.
+- Expanded existing library tools, see albums and singles saved without manual checks
 
 ## Contributing
 
