@@ -150,13 +150,76 @@
     });
   }
 
+  function createListButtons() {
+    if (!isYouTubeMusic()) return;
+
+    const listItems = document.querySelectorAll(
+      '#contents #secondary #contents #contents ytmusic-responsive-list-item-renderer'
+    );
+
+    listItems.forEach(item => {
+      const leftItems = item.querySelector('.left-items');
+      if (!leftItems) return;
+
+      const existing = item.querySelector('.ytm-list-log-button');
+      if (existing) return;
+
+      const listBtn = document.createElement('button');
+      listBtn.className = 'ytm-list-log-button';
+      listBtn.type = 'button';
+      listBtn.textContent = '⚙️';
+      listBtn.title = 'Advanced download options';
+      listBtn.style.marginLeft = '8px';
+      listBtn.style.marginRight = '1rem';
+      listBtn.style.padding = '4px 8px';
+      listBtn.style.fontSize = '12px';
+      listBtn.style.cursor = 'pointer';
+
+      listBtn.addEventListener('click', async () => {
+        const anchor = item.querySelector('a[href]');
+        const href = anchor ? anchor.getAttribute('href') : null;
+        if (!href) {
+          console.warn('No href found for list item');
+          return;
+        }
+
+        let absoluteUrl = href;
+        let vParam = null;
+
+        try {
+          const parsed = new URL(href, location.origin);
+          absoluteUrl = parsed.toString();
+          vParam = parsed.searchParams.get('v');
+        } catch (err) {
+          console.warn('Could not parse list href', err);
+        }
+
+        const payload = gatherData();
+        payload.url = absoluteUrl;
+        if (vParam) payload.name = vParam;
+
+        await runAdvancedDownloadFlow(listBtn, payload);
+      });
+
+      leftItems.insertAdjacentElement('afterend', listBtn);
+    });
+  }
+
   function attachMoreClickHandler(btn) {
     if (!btn || btn.dataset.handlerAttached) return;
     btn.dataset.handlerAttached = '1';
 
     btn.addEventListener('click', async () => {
+      const payload = gatherData();
+      await runAdvancedDownloadFlow(btn, payload);
+    });
+  }
+
+  async function runAdvancedDownloadFlow(btn, basePayload) {
       const original = btn.textContent;
-      const result = await showMoreOptionsModal();
+      const payloadBase = Object.assign({}, basePayload || gatherData());
+
+      const result = await showMoreOptionsModal(payloadBase);
       if (!result || result.action === 'cancel') {
         return;
       }
@@ -188,7 +251,7 @@
         btn.disabled = true;
         btn.textContent = 'Sending...';
 
-        const payload = gatherData();
+        const payload = Object.assign({}, payloadBase);
         if (result.isSingle) payload.isSingle = true;
         if (params) payload.params = params;
 
@@ -202,11 +265,13 @@
       } finally {
         btn.disabled = false;
       }
-    });
   }
 
-  function showMoreOptionsModal() {
+  function showMoreOptionsModal(contextPayload) {
     return new Promise(resolve => {
+      const activePayload = Object.assign({}, contextPayload || gatherData());
+      if (!activePayload.url) activePayload.url = location.href;
+
       let isSingle = false;
 
       const overlay = document.createElement('div');
@@ -235,6 +300,19 @@
       title.style.fontSize = '16px';
       title.style.fontWeight = '600';
       title.style.marginBottom = '10px';
+
+      const activeUrlLabel = document.createElement('div');
+      activeUrlLabel.textContent = 'Active URL';
+      activeUrlLabel.style.fontSize = '13px';
+      activeUrlLabel.style.fontWeight = '600';
+      activeUrlLabel.style.marginBottom = '6px';
+
+      const activeUrlValue = document.createElement('div');
+      activeUrlValue.textContent = activePayload.url;
+      activeUrlValue.style.fontSize = '12px';
+      activeUrlValue.style.opacity = '0.9';
+      activeUrlValue.style.wordBreak = 'break-all';
+      activeUrlValue.style.marginBottom = '12px';
 
       const quickActionsLabel = document.createElement('div');
       quickActionsLabel.textContent = 'Quick Actions';
@@ -337,7 +415,7 @@
         checkExistingQuickAction.textContent = 'Checking...';
 
         try {
-          const payload = gatherData();
+          const payload = Object.assign({}, activePayload);
           if (isSingle) payload.isSingle = true;
           const check = await checkExistingPath(payload);
           quickActionStatus.textContent = '';
@@ -389,6 +467,8 @@
       actions.appendChild(sendBtn);
 
       modal.appendChild(title);
+      modal.appendChild(activeUrlLabel);
+      modal.appendChild(activeUrlValue);
       modal.appendChild(quickActionsLabel);
       modal.appendChild(quickActionsWrap);
       modal.appendChild(customLabel);
@@ -421,6 +501,8 @@
       info.dataset.handlerAttached = '1';
       info.addEventListener('click', () => window.open(INFO_LINK, '_blank'));
     }
+
+    createListButtons();
     return true;
   }
 
