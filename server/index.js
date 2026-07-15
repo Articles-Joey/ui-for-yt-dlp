@@ -54,17 +54,18 @@ function parseBoolean(value) {
   return value.toLowerCase() === 'true' || value === '1';
 }
 
-function resolveTargetDir({ authorRaw, nameRaw, isSingle }) {
+function resolveTargetDir({ authorRaw, nameRaw, albumRaw, isSingle }) {
   const hasAuthor = Boolean(authorRaw && String(authorRaw).trim());
   const author = hasAuthor ? sanitizeName(authorRaw) : 'unknown';
   const name = nameRaw ? sanitizeName(nameRaw) : 'unknown';
+  const album = albumRaw && String(albumRaw).trim() ? sanitizeName(albumRaw) : name;
 
-  // Singles are grouped under artist/Singles unless artist is unknown.
-  if (isSingle && hasAuthor) {
-    return { author, name, targetDir: path.join(DOWNLOAD_PATH, author, 'Singles') };
+  // Singles are always grouped under artist/Singles.
+  if (isSingle) {
+    return { author, name, album, targetDir: path.join(DOWNLOAD_PATH, author, 'Singles') };
   }
 
-  return { author, name, targetDir: path.join(DOWNLOAD_PATH, author, name) };
+  return { author, name, album, targetDir: path.join(DOWNLOAD_PATH, author, album) };
 }
 
 const CORS_HEADERS = {
@@ -129,19 +130,34 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && req.url.startsWith('/location')) {
+    console.log('Received POST request to /location');
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      console.log('Request body:', body);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+    });
+    return;
+  }
+
   if (req.method === 'GET' && req.url.startsWith('/check')) {
     try {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
       const isSingle = parseBoolean(parsed.searchParams.get('isSingle'));
-      const { author, name, targetDir } = resolveTargetDir({
+      const { author, name, album, targetDir } = resolveTargetDir({
         authorRaw: parsed.searchParams.get('author'),
         nameRaw: parsed.searchParams.get('name'),
+        albumRaw: parsed.searchParams.get('album'),
         isSingle
       });
       const exists = fs.existsSync(targetDir);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name, isSingle }));
+      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name, album, isSingle }));
     } catch (err) {
       console.warn('Failed to check existing path', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -154,9 +170,10 @@ const server = http.createServer((req, res) => {
     try {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
       const isSingle = parseBoolean(parsed.searchParams.get('isSingle'));
-      const { author, name, targetDir } = resolveTargetDir({
+      const { author, name, album, targetDir } = resolveTargetDir({
         authorRaw: parsed.searchParams.get('author'),
         nameRaw: parsed.searchParams.get('name'),
+        albumRaw: parsed.searchParams.get('album'),
         isSingle
       });
       const exists = fs.existsSync(targetDir);
@@ -179,7 +196,7 @@ const server = http.createServer((req, res) => {
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name, isSingle }));
+      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name, album, isSingle }));
     } catch (err) {
       console.warn('Failed to open path', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -197,11 +214,17 @@ const server = http.createServer((req, res) => {
           const data = body ? JSON.parse(body) : {};
           console.log('[download] received:', data);
 
-          const authorRaw = data.author || null;
+          const authorRaw = data.author || data.artist || null;
           const url = data.url || '';
           const nameRaw = data.name || null;
-          const isSingle = Boolean(data.isSingle);
-          const { author, name, targetDir } = resolveTargetDir({ authorRaw, nameRaw, isSingle });
+          const albumRaw = data.album || null;
+          const isSingle = parseBoolean(data.isSingle);
+          const { author, name, album, targetDir } = resolveTargetDir({
+            authorRaw,
+            nameRaw,
+            albumRaw,
+            isSingle
+          });
 
           // Construct target directory and ensure it exists
           await fs.promises.mkdir(targetDir, { recursive: true });
@@ -230,7 +253,15 @@ const server = http.createServer((req, res) => {
           }
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(Object.assign({ status: 'ok', cmd: `${YTDLP_PATH} ${args.map(v => JSON.stringify(v)).join(' ')}` }, childInfo)));
+          res.end(JSON.stringify(Object.assign({
+            status: 'ok',
+            author,
+            name,
+            album,
+            isSingle,
+            targetDir,
+            cmd: `${YTDLP_PATH} ${args.map(v => JSON.stringify(v)).join(' ')}`
+          }, childInfo)));
         } catch (err) {
           console.warn('Failed to handle download', err);
           res.writeHead(500, { 'Content-Type': 'application/json' });

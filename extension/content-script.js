@@ -16,6 +16,51 @@
     return location.hostname === 'www.youtube.com' || location.hostname === 'youtube.com';
   }
 
+  function getText(element) {
+    const text = element ? (element.textContent || '').trim() : '';
+    return text || null;
+  }
+
+  function getActiveAlbum(name) {
+    if (!isYouTubeMusic()) return null;
+
+    const primary = document.querySelector('#content-wrapper #contents #primary');
+    const detailHeader = primary && primary.querySelector('ytmusic-detail-header-renderer');
+    if (!detailHeader) return null;
+
+    const albumTitle = detailHeader.querySelector('.title, #title, yt-formatted-string');
+    const albumLink = detailHeader.querySelector('a[href*="/browse/"], a[href*="/album/"]');
+    return getText(albumTitle) || getText(albumLink) || getText(detailHeader) || name || null;
+  }
+
+  function getYouTubeMusicListItemMetadata(item) {
+    const flexColumns = item.querySelector('.flex-columns');
+    const title = flexColumns && flexColumns.querySelector('.title');
+    const secondaryColumns = flexColumns
+      ? Array.from(flexColumns.querySelectorAll('.secondary-flex-columns > .secondary-flex-column'))
+      : [];
+
+    const getColumnLink = column => column && column.querySelector('a[href]');
+    const getColumnText = column => getText(getColumnLink(column)) || getText(column);
+
+    const artistColumn = secondaryColumns.find(column => {
+      const link = getColumnLink(column);
+      const href = link ? link.getAttribute('href') || '' : '';
+      return href.includes('/channel/') || href.includes('/artist/') || href.startsWith('/@');
+    });
+    const albumColumn = secondaryColumns.find(column => {
+      const link = getColumnLink(column);
+      const href = link ? link.getAttribute('href') || '' : '';
+      return href.includes('/browse/') || href.includes('/album/');
+    });
+
+    return {
+      name: getText(title),
+      author: getColumnText(artistColumn) || getColumnText(secondaryColumns[0]),
+      album: getColumnText(albumColumn) || getColumnText(secondaryColumns[1])
+    };
+  }
+
   // Fetch runtime config from local server to centralize editable values
   (async function fetchConfig() {
     try {
@@ -89,7 +134,8 @@
     const url = location.href;
     const nameEl = document.querySelector('h1 .title') || document.querySelector('h1.title') || document.querySelector('h1');
     const name = nameEl ? (nameEl.textContent || '').trim() : null;
-    return { author, url, name };
+    const album = getActiveAlbum(name);
+    return { author, album, url, name };
   }
 
   async function sendDownload(payload) {
@@ -111,6 +157,7 @@
     const params = new URLSearchParams();
     params.set('author', payload.author || 'unknown');
     params.set('name', payload.name || 'unknown');
+    params.set('album', payload.album || '');
     params.set('isSingle', payload.isSingle ? 'true' : 'false');
 
     const resp = await fetch(`${CHECK_ENDPOINT}?${params.toString()}`);
@@ -122,6 +169,7 @@
     const params = new URLSearchParams();
     params.set('author', payload.author || 'unknown');
     params.set('name', payload.name || 'unknown');
+    params.set('album', payload.album || '');
     params.set('isSingle', payload.isSingle ? 'true' : 'false');
 
     const resp = await fetch(`${OPEN_PATH_ENDPOINT}?${params.toString()}`);
@@ -175,8 +223,13 @@
       listBtn.style.fontSize = '12px';
       listBtn.style.cursor = 'pointer';
 
-      listBtn.addEventListener('click', async () => {
-        const anchor = item.querySelector('a[href]');
+      listBtn.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const anchor =
+          item.querySelector('a[href*="/watch"], a[href*="watch?v="]') ||
+          item.querySelector('.flex-columns .title a[href], .title a[href], a[href]');
         const href = anchor ? anchor.getAttribute('href') : null;
         if (!href) {
           console.warn('No href found for list item');
@@ -184,19 +237,21 @@
         }
 
         let absoluteUrl = href;
-        let vParam = null;
 
         try {
           const parsed = new URL(href, location.origin);
           absoluteUrl = parsed.toString();
-          vParam = parsed.searchParams.get('v');
         } catch (err) {
           console.warn('Could not parse list href', err);
         }
 
         const payload = gatherData();
+        const rowMetadata = getYouTubeMusicListItemMetadata(item);
         payload.url = absoluteUrl;
-        if (vParam) payload.name = vParam;
+        payload.name = rowMetadata.name || null;
+        payload.author = rowMetadata.author || null;
+        payload.artist = rowMetadata.author || null;
+        payload.album = rowMetadata.album || payload.album || null;
 
         await runAdvancedDownloadFlow(listBtn, payload);
       });
@@ -313,6 +368,26 @@
       activeUrlValue.style.opacity = '0.9';
       activeUrlValue.style.wordBreak = 'break-all';
       activeUrlValue.style.marginBottom = '12px';
+
+      const activeMetadataLabel = document.createElement('div');
+      activeMetadataLabel.textContent = 'Active Metadata';
+      activeMetadataLabel.style.fontSize = '13px';
+      activeMetadataLabel.style.fontWeight = '600';
+      activeMetadataLabel.style.marginBottom = '6px';
+
+      const activeMetadataWrap = document.createElement('div');
+      activeMetadataWrap.style.fontSize = '12px';
+      activeMetadataWrap.style.opacity = '0.9';
+      activeMetadataWrap.style.marginBottom = '12px';
+
+      const activeAlbumValue = document.createElement('div');
+      activeAlbumValue.textContent = `Active Album: ${activePayload.album || 'Not detected'}`;
+
+      const activeArtistValue = document.createElement('div');
+      activeArtistValue.textContent = `Active Artist: ${activePayload.author || activePayload.artist || 'Not detected'}`;
+
+      activeMetadataWrap.appendChild(activeAlbumValue);
+      activeMetadataWrap.appendChild(activeArtistValue);
 
       const quickActionsLabel = document.createElement('div');
       quickActionsLabel.textContent = 'Quick Actions';
@@ -469,6 +544,8 @@
       modal.appendChild(title);
       modal.appendChild(activeUrlLabel);
       modal.appendChild(activeUrlValue);
+      modal.appendChild(activeMetadataLabel);
+      modal.appendChild(activeMetadataWrap);
       modal.appendChild(quickActionsLabel);
       modal.appendChild(quickActionsWrap);
       modal.appendChild(customLabel);
