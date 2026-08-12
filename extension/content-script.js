@@ -8,58 +8,7 @@
   const INFO_BUTTON_ID = 'ytm-info-button';
   let INFO_LINK = 'https://github.com/Articles-Joey/ui-for-yt-dlp';
 
-  function isYouTubeMusic() {
-    return location.hostname === 'music.youtube.com';
-  }
-
-  function isYouTube() {
-    return location.hostname === 'www.youtube.com' || location.hostname === 'youtube.com';
-  }
-
-  function getText(element) {
-    const text = element ? (element.textContent || '').trim() : '';
-    return text || null;
-  }
-
-  function getActiveAlbum(name) {
-    if (!isYouTubeMusic()) return null;
-
-    const primary = document.querySelector('#content-wrapper #contents #primary');
-    const detailHeader = primary && primary.querySelector('ytmusic-detail-header-renderer');
-    if (!detailHeader) return null;
-
-    const albumTitle = detailHeader.querySelector('.title, #title, yt-formatted-string');
-    const albumLink = detailHeader.querySelector('a[href*="/browse/"], a[href*="/album/"]');
-    return getText(albumTitle) || getText(albumLink) || getText(detailHeader) || name || null;
-  }
-
-  function getYouTubeMusicListItemMetadata(item) {
-    const flexColumns = item.querySelector('.flex-columns');
-    const title = flexColumns && flexColumns.querySelector('.title');
-    const secondaryColumns = flexColumns
-      ? Array.from(flexColumns.querySelectorAll('.secondary-flex-columns > .secondary-flex-column'))
-      : [];
-
-    const getColumnLink = column => column && column.querySelector('a[href]');
-    const getColumnText = column => getText(getColumnLink(column)) || getText(column);
-
-    const artistColumn = secondaryColumns.find(column => {
-      const link = getColumnLink(column);
-      const href = link ? link.getAttribute('href') || '' : '';
-      return href.includes('/channel/') || href.includes('/artist/') || href.startsWith('/@');
-    });
-    const albumColumn = secondaryColumns.find(column => {
-      const link = getColumnLink(column);
-      const href = link ? link.getAttribute('href') || '' : '';
-      return href.includes('/browse/') || href.includes('/album/');
-    });
-
-    return {
-      name: getText(title),
-      author: getColumnText(artistColumn) || getColumnText(secondaryColumns[0]),
-      album: getColumnText(albumColumn) || getColumnText(secondaryColumns[1])
-    };
-  }
+  const { createPathQuery, gatherData, getYouTubeMusicListItemMetadata, isYouTube, isYouTubeMusic } = globalThis.YtdlpUtils;
 
   // Fetch runtime config from local server to centralize editable values
   (async function fetchConfig() {
@@ -122,22 +71,6 @@
     return wrap;
   }
 
-  function gatherData() {
-    let authorEl = null;
-    if (isYouTube()) {
-      authorEl = document.querySelector('#top-row #owner #upload-info #text-container a');
-    } else if (isYouTubeMusic()) {
-      authorEl = document.querySelector('.strapline-text a');
-    }
-
-    const author = authorEl ? (authorEl.textContent || '').trim() || null : null;
-    const url = location.href;
-    const nameEl = document.querySelector('h1 .title') || document.querySelector('h1.title') || document.querySelector('h1');
-    const name = nameEl ? (nameEl.textContent || '').trim() : null;
-    const album = getActiveAlbum(name);
-    return { author, album, url, name };
-  }
-
   async function sendDownload(payload) {
     try {
       const resp = await fetch(ENDPOINT, {
@@ -154,11 +87,7 @@
   }
 
   async function checkExistingPath(payload) {
-    const params = new URLSearchParams();
-    params.set('author', payload.author || 'unknown');
-    params.set('name', payload.name || 'unknown');
-    params.set('album', payload.album || '');
-    params.set('isSingle', payload.isSingle ? 'true' : 'false');
+    const params = createPathQuery(payload);
 
     const resp = await fetch(`${CHECK_ENDPOINT}?${params.toString()}`);
     if (!resp.ok) throw new Error('Non-OK response: ' + resp.status);
@@ -166,11 +95,7 @@
   }
 
   async function openExistingPath(payload) {
-    const params = new URLSearchParams();
-    params.set('author', payload.author || 'unknown');
-    params.set('name', payload.name || 'unknown');
-    params.set('album', payload.album || '');
-    params.set('isSingle', payload.isSingle ? 'true' : 'false');
+    const params = createPathQuery(payload);
 
     const resp = await fetch(`${OPEN_PATH_ENDPOINT}?${params.toString()}`);
     if (!resp.ok) throw new Error('Non-OK response: ' + resp.status);
@@ -309,6 +234,7 @@
         const payload = Object.assign({}, payloadBase);
         if (result.isSingle) payload.isSingle = true;
         if (params) payload.params = params;
+        if (result.overrides) Object.assign(payload, result.overrides);
 
         await sendDownload(payload);
         btn.textContent = 'Sent';
@@ -388,6 +314,65 @@
 
       activeMetadataWrap.appendChild(activeAlbumValue);
       activeMetadataWrap.appendChild(activeArtistValue);
+
+      const overridesLabel = document.createElement('div');
+      overridesLabel.textContent = 'Overrides (optional)';
+      overridesLabel.style.fontSize = '13px';
+      overridesLabel.style.fontWeight = '600';
+      overridesLabel.style.marginBottom = '6px';
+
+      const overridesWrap = document.createElement('div');
+      overridesWrap.style.display = 'grid';
+      overridesWrap.style.gap = '8px';
+      overridesWrap.style.marginBottom = '12px';
+
+      const createOverrideInput = (labelText, value, placeholder) => {
+        const field = document.createElement('label');
+        field.textContent = labelText;
+        field.style.display = 'grid';
+        field.style.gap = '4px';
+        field.style.fontSize = '12px';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = value || '';
+        input.placeholder = placeholder;
+        input.style.width = '100%';
+        input.style.boxSizing = 'border-box';
+        input.style.padding = '8px';
+
+        field.appendChild(input);
+        overridesWrap.appendChild(field);
+        return input;
+      };
+
+      const artistOverrideInput = createOverrideInput(
+        'Artist override',
+        activePayload.author || activePayload.artist,
+        'Leave blank to use the detected artist'
+      );
+      const titleOverrideInput = createOverrideInput(
+        'Title override',
+        activePayload.name,
+        'Current title is prefilled'
+      );
+      const albumOverrideInput = createOverrideInput(
+        'Album override',
+        activePayload.album,
+        'Leave blank to use the detected album'
+      );
+      const savePathOverrideInput = createOverrideInput(
+        'Exact save location',
+        activePayload.savePathOverride,
+        'Example: D:\\Music\\Artist\\Album'
+      );
+
+      const collectOverrides = () => ({
+        authorOverride: artistOverrideInput.value.trim(),
+        titleOverride: titleOverrideInput.value.trim(),
+        albumOverride: albumOverrideInput.value.trim(),
+        savePathOverride: savePathOverrideInput.value.trim()
+      });
 
       const quickActionsLabel = document.createElement('div');
       quickActionsLabel.textContent = 'Quick Actions';
@@ -477,8 +462,17 @@
       });
 
       cancelBtn.addEventListener('click', () => close({ action: 'cancel' }));
-      sendBtn.addEventListener('click', () => close({ action: 'custom', customParamsText: customInput.value, isSingle }));
-      mp3QuickAction.addEventListener('click', () => close({ action: 'quick-mp3', isSingle }));
+      sendBtn.addEventListener('click', () => close({
+        action: 'custom',
+        customParamsText: customInput.value,
+        isSingle,
+        overrides: collectOverrides()
+      }));
+      mp3QuickAction.addEventListener('click', () => close({
+        action: 'quick-mp3',
+        isSingle,
+        overrides: collectOverrides()
+      }));
       toggleSingleQuickAction.addEventListener('click', () => {
         isSingle = !isSingle;
         toggleSingleQuickAction.textContent = `Toggle Is Single: ${isSingle ? 'On' : 'Off'}`;
@@ -492,6 +486,7 @@
         try {
           const payload = Object.assign({}, activePayload);
           if (isSingle) payload.isSingle = true;
+          Object.assign(payload, collectOverrides());
           const check = await checkExistingPath(payload);
           quickActionStatus.textContent = '';
 
@@ -546,6 +541,8 @@
       modal.appendChild(activeUrlValue);
       modal.appendChild(activeMetadataLabel);
       modal.appendChild(activeMetadataWrap);
+      modal.appendChild(overridesLabel);
+      modal.appendChild(overridesWrap);
       modal.appendChild(quickActionsLabel);
       modal.appendChild(quickActionsWrap);
       modal.appendChild(customLabel);

@@ -54,18 +54,65 @@ function parseBoolean(value) {
   return value.toLowerCase() === 'true' || value === '1';
 }
 
-function resolveTargetDir({ authorRaw, nameRaw, albumRaw, isSingle }) {
-  const hasAuthor = Boolean(authorRaw && String(authorRaw).trim());
-  const author = hasAuthor ? sanitizeName(authorRaw) : 'unknown';
-  const name = nameRaw ? sanitizeName(nameRaw) : 'unknown';
-  const album = albumRaw && String(albumRaw).trim() ? sanitizeName(albumRaw) : name;
+function firstNonEmpty(...values) {
+  return values.find(value => value !== undefined && value !== null && String(value).trim()) || null;
+}
+
+function normalizeSavePath(value) {
+  const savePath = firstNonEmpty(value);
+  if (!savePath) return null;
+
+  const normalizedPath = String(savePath).trim();
+  if (normalizedPath.includes('\u0000')) {
+    throw new Error('Save path cannot contain null characters');
+  }
+
+  return path.resolve(normalizedPath);
+}
+
+function resolveTargetDir({
+  authorRaw,
+  authorOverrideRaw,
+  nameRaw,
+  titleOverrideRaw,
+  albumRaw,
+  albumOverrideRaw,
+  savePathOverrideRaw,
+  isSingle
+}) {
+  const effectiveAuthor = firstNonEmpty(authorOverrideRaw, authorRaw);
+  const effectiveName = firstNonEmpty(titleOverrideRaw, nameRaw);
+  const effectiveAlbum = firstNonEmpty(albumOverrideRaw, albumRaw);
+  const author = effectiveAuthor ? sanitizeName(effectiveAuthor) : 'unknown';
+  const name = effectiveName ? sanitizeName(effectiveName) : 'unknown';
+  const album = effectiveAlbum ? sanitizeName(effectiveAlbum) : name;
+  const titleOverride = firstNonEmpty(titleOverrideRaw) ? name : null;
+  const savePathOverride = normalizeSavePath(savePathOverrideRaw);
+
+  if (savePathOverride) {
+    return { author, name, album, titleOverride, targetDir: savePathOverride, savePathOverride };
+  }
 
   // Singles are always grouped under artist/Singles.
   if (isSingle) {
-    return { author, name, album, targetDir: path.join(DOWNLOAD_PATH, author, 'Singles') };
+    return {
+      author,
+      name,
+      album,
+      titleOverride,
+      targetDir: path.join(DOWNLOAD_PATH, author, 'Singles'),
+      savePathOverride: null
+    };
   }
 
-  return { author, name, album, targetDir: path.join(DOWNLOAD_PATH, author, album) };
+  return {
+    author,
+    name,
+    album,
+    titleOverride,
+    targetDir: path.join(DOWNLOAD_PATH, author, album),
+    savePathOverride: null
+  };
 }
 
 const CORS_HEADERS = {
@@ -148,16 +195,20 @@ const server = http.createServer((req, res) => {
     try {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
       const isSingle = parseBoolean(parsed.searchParams.get('isSingle'));
-      const { author, name, album, targetDir } = resolveTargetDir({
+      const { author, name, album, targetDir, savePathOverride } = resolveTargetDir({
         authorRaw: parsed.searchParams.get('author'),
+        authorOverrideRaw: parsed.searchParams.get('authorOverride'),
         nameRaw: parsed.searchParams.get('name'),
+        titleOverrideRaw: parsed.searchParams.get('titleOverride'),
         albumRaw: parsed.searchParams.get('album'),
+        albumOverrideRaw: parsed.searchParams.get('albumOverride'),
+        savePathOverrideRaw: parsed.searchParams.get('savePathOverride'),
         isSingle
       });
       const exists = fs.existsSync(targetDir);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name, album, isSingle }));
+      res.end(JSON.stringify({ status: 'ok', exists, path: targetDir, author, name, album, isSingle, savePathOverride }));
     } catch (err) {
       console.warn('Failed to check existing path', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -170,10 +221,14 @@ const server = http.createServer((req, res) => {
     try {
       const parsed = new URL(req.url, `http://localhost:${PORT}`);
       const isSingle = parseBoolean(parsed.searchParams.get('isSingle'));
-      const { author, name, album, targetDir } = resolveTargetDir({
+      const { author, name, album, targetDir, savePathOverride } = resolveTargetDir({
         authorRaw: parsed.searchParams.get('author'),
+        authorOverrideRaw: parsed.searchParams.get('authorOverride'),
         nameRaw: parsed.searchParams.get('name'),
+        titleOverrideRaw: parsed.searchParams.get('titleOverride'),
         albumRaw: parsed.searchParams.get('album'),
+        albumOverrideRaw: parsed.searchParams.get('albumOverride'),
+        savePathOverrideRaw: parsed.searchParams.get('savePathOverride'),
         isSingle
       });
       const exists = fs.existsSync(targetDir);
@@ -196,7 +251,7 @@ const server = http.createServer((req, res) => {
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name, album, isSingle }));
+      res.end(JSON.stringify({ status: 'ok', opened: true, path: targetDir, author, name, album, isSingle, savePathOverride }));
     } catch (err) {
       console.warn('Failed to open path', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -215,14 +270,22 @@ const server = http.createServer((req, res) => {
           console.log('[download] received:', data);
 
           const authorRaw = data.author || data.artist || null;
+          const authorOverrideRaw = data.authorOverride || data.artistOverride || null;
           const url = data.url || '';
           const nameRaw = data.name || null;
+          const titleOverrideRaw = data.titleOverride || data.nameOverride || null;
           const albumRaw = data.album || null;
+          const albumOverrideRaw = data.albumOverride || null;
+          const savePathOverrideRaw = data.savePathOverride || null;
           const isSingle = parseBoolean(data.isSingle);
-          const { author, name, album, targetDir } = resolveTargetDir({
+          const { author, name, album, titleOverride, targetDir, savePathOverride } = resolveTargetDir({
             authorRaw,
+            authorOverrideRaw,
             nameRaw,
+            titleOverrideRaw,
             albumRaw,
+            albumOverrideRaw,
+            savePathOverrideRaw,
             isSingle
           });
 
@@ -232,7 +295,11 @@ const server = http.createServer((req, res) => {
           // Build yt-dlp args safely (avoid shell interpolation)
           const mergedParams = Object.assign({}, DEFAULT_YTDLP_PARAMS, projectConfig.YTDLP_PARAMS || {}, data.params || {});
           const extraArgs = toYtDlpArgsFromObject(mergedParams);
-          const args = ['-P', targetDir, ...extraArgs, url];
+          const outputTemplate = titleOverride
+            ? path.join(targetDir, `${titleOverride.replace(/%/g, '%%')}.%(ext)s`)
+            : null;
+          const outputArgs = outputTemplate ? ['--output', outputTemplate] : [];
+          const args = ['-P', targetDir, ...extraArgs, ...outputArgs, url];
 
           console.log('[download] spawning:', YTDLP_PATH, args);
 
@@ -259,7 +326,10 @@ const server = http.createServer((req, res) => {
             name,
             album,
             isSingle,
+            titleOverride,
+            savePathOverride,
             targetDir,
+            outputTemplate,
             cmd: `${YTDLP_PATH} ${args.map(v => JSON.stringify(v)).join(' ')}`
           }, childInfo)));
         } catch (err) {

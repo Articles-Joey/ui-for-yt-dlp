@@ -185,12 +185,23 @@
 
         <div class="row two">
             <div>
-                <label for="author">Author (optional)</label>
+                <label for="author">Artist / author override (optional)</label>
                 <input id="author" type="text" placeholder="Artist name" />
             </div>
             <div>
-                <label for="name">Name (optional, defaults to Video ID)</label>
+                <label for="name">Title override (optional, defaults to Video ID)</label>
                 <input id="name" type="text" placeholder="Track or album name" />
+            </div>
+        </div>
+
+        <div class="row two">
+            <div>
+                <label for="album">Album override (optional)</label>
+                <input id="album" type="text" placeholder="Album name" />
+            </div>
+            <div>
+                <label for="savePathOverride">Exact save location (optional)</label>
+                <input id="savePathOverride" type="text" placeholder="D:\Music\Artist\Album" />
             </div>
         </div>
 
@@ -219,6 +230,8 @@
         const videoIdEl = document.getElementById('videoId');
         const authorEl = document.getElementById('author');
         const nameEl = document.getElementById('name');
+        const albumEl = document.getElementById('album');
+        const savePathOverrideEl = document.getElementById('savePathOverride');
         const isSingleEl = document.getElementById('isSingle');
         const extractMp3El = document.getElementById('extractMp3');
         const customParamsEl = document.getElementById('customParams');
@@ -258,11 +271,15 @@
 
             const payload = {
                 url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
-                name: nameEl.value.trim() || videoId
+                titleOverride: nameEl.value.trim() || videoId
             };
 
             const author = authorEl.value.trim();
-            if (author) payload.author = author;
+            const album = albumEl.value.trim();
+            const savePathOverride = savePathOverrideEl.value.trim();
+            if (author) payload.authorOverride = author;
+            if (album) payload.albumOverride = album;
+            if (savePathOverride) payload.savePathOverride = savePathOverride;
             if (isSingleEl.checked) payload.isSingle = true;
             if (Object.keys(params).length) payload.params = params;
 
@@ -304,6 +321,8 @@
             videoIdEl.value = '';
             authorEl.value = '';
             nameEl.value = '';
+            albumEl.value = '';
+            savePathOverrideEl.value = '';
             isSingleEl.checked = false;
             extractMp3El.checked = false;
             customParamsEl.value = '';

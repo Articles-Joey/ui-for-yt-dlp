@@ -55,6 +55,17 @@ Note: If you want to use npm run dev then nodemon must be installed globally.
 
 Will try and fetch the artist and album name to download the output to `${DOWNLOAD_PATH}/${artist}/${album}`
 
+The extension's **Advanced download options** can override the detected values when YouTube Music metadata is missing or incorrect:
+
+- `Artist override` changes the artist folder.
+- `Title override` changes the saved filename and the title used when the album folder falls back to the track title. The current title is prefilled in the extension.
+- `Album override` changes the album folder.
+- `Exact save location` sends the download to that directory and takes precedence over the normal artist/album and single-folder calculation.
+
+The standalone server UI exposes the same overrides. Blank fields keep the automatic/default behavior.
+
+For integrations, the backend accepts `authorOverride`, `albumOverride`, and `savePathOverride` in the `/download`, `/check`, and `/open-path` requests.
+
 ## TODO
 
 - Expanded existing library tools, see albums and singles saved without manual checks
