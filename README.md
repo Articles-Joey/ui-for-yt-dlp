@@ -4,6 +4,8 @@ Yet another yt-dlp tool that will be buried in the endless sea of shit and slop.
 
 ![Preview Image](preview.webp)
 
+<small>More preview photos at bottom of README</small>
+
 Makes downloading videos and albums from YouTube and YouTube Music easier when using yt-dlp. Super minimal Chrome extension that pairs with a local server to handle downloads.
 
 If buttons fail to appear after navigation, click the extension icon while on a supported page to manually inject them.
@@ -78,3 +80,6 @@ For integrations, the backend accepts `authorOverride`, `albumOverride`, and `sa
 ## Attributions
 
 [ArticlesJoey - Developer](https://github.com/Articles-Joey)
+
+![Preview Image](preview-options.webp)
+![Preview Image](preview-youtube.webp)
