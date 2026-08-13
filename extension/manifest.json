@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UI for yt-dlp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Adds download buttons to make using yt-dlp easier.",
   "action": {
     "default_title": "Inject yt-dlp buttons"

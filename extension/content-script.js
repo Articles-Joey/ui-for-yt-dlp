@@ -195,6 +195,17 @@
     });
   }
 
+  function isYouTubeMusicPlaylistOrAlbumUrl(url) {
+    if (!isYouTubeMusic()) return false;
+
+    try {
+      const parsed = new URL(url, location.origin);
+      return parsed.pathname === '/playlist' || parsed.pathname.startsWith('/browse/');
+    } catch (err) {
+      return false;
+    }
+  }
+
   async function runAdvancedDownloadFlow(btn, basePayload) {
       const original = btn.textContent;
       const payloadBase = Object.assign({}, basePayload || gatherData());
@@ -346,6 +357,12 @@
         return input;
       };
 
+      const isCollectionDownload = isYouTubeMusicPlaylistOrAlbumUrl(activePayload.url);
+      const titleOverrideValue = isCollectionDownload ? '' : activePayload.name;
+      const albumOverrideValue = isCollectionDownload
+        ? activePayload.album || activePayload.name
+        : activePayload.album;
+
       const artistOverrideInput = createOverrideInput(
         'Artist override',
         activePayload.author || activePayload.artist,
@@ -353,12 +370,12 @@
       );
       const titleOverrideInput = createOverrideInput(
         'Title override',
-        activePayload.name,
+        titleOverrideValue,
         'Current title is prefilled'
       );
       const albumOverrideInput = createOverrideInput(
         'Album override',
-        activePayload.album,
+        albumOverrideValue,
         'Leave blank to use the detected album'
       );
       const savePathOverrideInput = createOverrideInput(
