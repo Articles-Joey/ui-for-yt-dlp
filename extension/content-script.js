@@ -216,10 +216,6 @@
       }
 
       let params = null;
-      if (result.action === 'quick-mp3') {
-        params = { 'extract-audio': true, 'audio-format': 'mp3' };
-      }
-
       if (result.action === 'custom') {
         const trimmedParams = (result.customParamsText || '').trim();
         if (trimmedParams) {
@@ -236,6 +232,13 @@
             return;
           }
         }
+      }
+
+      if (result.extractAudioMp3) {
+        params = Object.assign({}, params || {}, {
+          'extract-audio': true,
+          'audio-format': 'mp3'
+        });
       }
 
       try {
@@ -265,6 +268,8 @@
       if (!activePayload.url) activePayload.url = location.href;
 
       let isSingle = false;
+      const isCollectionDownload = isYouTubeMusicPlaylistOrAlbumUrl(activePayload.url);
+      let mp3Only = isCollectionDownload;
 
       const overlay = document.createElement('div');
       overlay.style.position = 'fixed';
@@ -357,7 +362,6 @@
         return input;
       };
 
-      const isCollectionDownload = isYouTubeMusicPlaylistOrAlbumUrl(activePayload.url);
       const titleOverrideValue = isCollectionDownload ? '' : activePayload.name;
       const albumOverrideValue = isCollectionDownload
         ? activePayload.album || activePayload.name
@@ -406,12 +410,12 @@
       toggleSingleQuickAction.style.padding = '8px 10px';
       toggleSingleQuickAction.style.cursor = 'pointer';
 
-      const mp3QuickAction = document.createElement('button');
-      mp3QuickAction.type = 'button';
-      mp3QuickAction.textContent = 'Extract audio as MP3';
-      mp3QuickAction.style.padding = '8px 10px';
-      mp3QuickAction.style.cursor = 'pointer';
-      mp3QuickAction.style.marginLeft = '8px';
+      const mp3OnlyToggle = document.createElement('button');
+      mp3OnlyToggle.type = 'button';
+      mp3OnlyToggle.textContent = `MP3 Only: ${mp3Only ? 'On' : 'Off'}`;
+      mp3OnlyToggle.style.padding = '8px 10px';
+      mp3OnlyToggle.style.cursor = 'pointer';
+      mp3OnlyToggle.style.marginLeft = '8px';
 
       const checkExistingQuickAction = document.createElement('button');
       checkExistingQuickAction.type = 'button';
@@ -483,16 +487,16 @@
         action: 'custom',
         customParamsText: customInput.value,
         isSingle,
-        overrides: collectOverrides()
-      }));
-      mp3QuickAction.addEventListener('click', () => close({
-        action: 'quick-mp3',
-        isSingle,
+        extractAudioMp3: mp3Only,
         overrides: collectOverrides()
       }));
       toggleSingleQuickAction.addEventListener('click', () => {
         isSingle = !isSingle;
         toggleSingleQuickAction.textContent = `Toggle Is Single: ${isSingle ? 'On' : 'Off'}`;
+      });
+      mp3OnlyToggle.addEventListener('click', () => {
+        mp3Only = !mp3Only;
+        mp3OnlyToggle.textContent = `MP3 Only: ${mp3Only ? 'On' : 'Off'}`;
       });
       checkExistingQuickAction.addEventListener('click', async () => {
         const originalText = checkExistingQuickAction.textContent;
@@ -547,7 +551,7 @@
       });
 
       quickActionsWrap.appendChild(toggleSingleQuickAction);
-      quickActionsWrap.appendChild(mp3QuickAction);
+      quickActionsWrap.appendChild(mp3OnlyToggle);
       quickActionsWrap.appendChild(checkExistingQuickAction);
       quickActionsWrap.appendChild(quickActionStatus);
       actions.appendChild(cancelBtn);
