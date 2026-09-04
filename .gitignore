@@ -34,4 +34,6 @@ yarn-error.log*
 # vercel
 .vercel
 
+ui-for-yt-dlp.log*
+
 /am_project_manager

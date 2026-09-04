@@ -2,6 +2,7 @@ const http = require('http');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const projectConfig = require('../config');
 
@@ -10,11 +11,27 @@ const YTDLP_PATH = projectConfig.YTDLP_PATH || 'D:\\Videos\\yt-dlp\\yt-dlp.exe';
 const DOWNLOAD_PATH = projectConfig.DOWNLOAD_PATH || 'D:\\Music';
 const UI_HTML_PATH = path.join(__dirname, 'ui.html');
 const ICON_128_PATH = path.join(__dirname, '..', 'extension', 'icons', 'icon_128.png');
+const DOWNLOAD_LOG_PATH = path.join(__dirname, '..', 'ui-for-yt-dlp.log');
+const DOWNLOAD_EVENT_MARKER = '__UI_FOR_YTDLP_DOWNLOAD_EVENT__';
+const DOWNLOAD_EVENT_FIELDS = [
+  '%(webpage_url|)j',
+  '%(title|)j',
+  '%(playlist_title|)j',
+  '%(playlist|)j',
+  '%(album|)j',
+  '%(id|)j',
+  '%(filepath|)j',
+  '%(playlist_index|)j',
+  '%(playlist_count|)j',
+  '%(n_entries|)j'
+];
 const DEFAULT_YTDLP_PARAMS = {
   'sleep-requests': 1,
   'sleep-interval': 1,
   'max-sleep-interval': 3
 };
+
+let downloadLogQueue = Promise.resolve();
 
 function toYtDlpArgsFromObject(params = {}) {
   const args = [];
@@ -56,6 +73,282 @@ function parseBoolean(value) {
 
 function firstNonEmpty(...values) {
   return values.find(value => value !== undefined && value !== null && String(value).trim()) || null;
+}
+
+function appendDownloadLog(entry) {
+  const line = `${JSON.stringify(entry)}${os.EOL}`;
+
+  // Serialize writes so simultaneous album/playlist requests cannot interleave
+  // JSON lines in the log file.
+  downloadLogQueue = downloadLogQueue
+    .then(() => fs.promises.appendFile(DOWNLOAD_LOG_PATH, line, 'utf8'))
+    .catch(err => {
+      console.warn('Failed to write download log', err);
+    });
+
+  return downloadLogQueue;
+}
+
+function isCollectionUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.pathname === '/playlist' || parsed.pathname.startsWith('/browse/');
+  } catch (err) {
+    return false;
+  }
+}
+
+function getFallbackPlaylist({ url, data, nameRaw, albumRaw, albumOverrideRaw }) {
+  const explicitPlaylist = firstNonEmpty(data.playlist, data.playlistTitle);
+  if (explicitPlaylist) return String(explicitPlaylist).trim();
+
+  // The extension already sends album metadata for list-item downloads. This
+  // also covers album/playlist page requests without requiring frontend changes.
+  if (isCollectionUrl(url) || albumRaw || albumOverrideRaw) {
+    const album = firstNonEmpty(albumOverrideRaw, albumRaw, isCollectionUrl(url) ? nameRaw : null);
+    return album ? String(album).trim() : null;
+  }
+
+  return null;
+}
+
+function getDownloadMonitoringArgs() {
+  const fields = DOWNLOAD_EVENT_FIELDS.join('\t');
+
+  return [
+    // --print can imply simulation in some combinations of options. Explicitly
+    // disable it so monitoring never changes whether a file is downloaded.
+    '--no-simulate',
+    '--print',
+    `before_dl:${DOWNLOAD_EVENT_MARKER}\tbefore\t${fields}`,
+    '--print',
+    `after_move:${DOWNLOAD_EVENT_MARKER}\tafter\t${fields}`
+  ];
+}
+
+function parseYtDlpEventLine(line) {
+  const markerIndex = line.indexOf(DOWNLOAD_EVENT_MARKER);
+  if (markerIndex === -1) return null;
+
+  const parts = line.slice(markerIndex).trim().split('\t');
+  if (parts[0] !== DOWNLOAD_EVENT_MARKER || !parts[1]) return null;
+
+  const values = parts.slice(2).map(value => {
+    if (!value || value === 'NA') return null;
+
+    try {
+      return JSON.parse(value);
+    } catch (err) {
+      // Keep the event useful if a future yt-dlp output conversion changes.
+      return value;
+    }
+  });
+
+  return {
+    type: parts[1],
+    url: values[0] || null,
+    title: values[1] || null,
+    playlistTitle: values[2] || null,
+    playlist: values[3] || null,
+    album: values[4] || null,
+    id: values[5] || null,
+    filePath: values[6] || null,
+    playlistIndex: values[7] || null,
+    playlistCount: values[8] || null,
+    entryCount: values[9] || null
+  };
+}
+
+function createDownloadTracker({ requestUrl, requestData, album, fallbackPlaylist }) {
+  const pendingItems = [];
+  const completedKeys = new Set();
+  let completedCount = 0;
+  let latestError = null;
+  let finished = false;
+  let sawEvent = false;
+  let stdoutRemainder = '';
+  let finishedItemCount = 0;
+  let collectionTotal = null;
+
+  function eventKey(item) {
+    return firstNonEmpty(item.url, item.id, item.title);
+  }
+
+  function getPlaylist(item) {
+    const playlist = firstNonEmpty(item.playlistTitle, item.playlist, fallbackPlaylist);
+    return playlist ? String(playlist).trim() : null;
+  }
+
+  function positiveInteger(value) {
+    const number = Number.parseInt(value, 10);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+
+  function updateCollectionTotal(item) {
+    const total = positiveInteger(firstNonEmpty(item.playlistCount, item.entryCount));
+    if (total) collectionTotal = total;
+    return total || collectionTotal;
+  }
+
+  function logItemProgress(status, item) {
+    const title = firstNonEmpty(item.title, requestData.name, item.url) || 'unknown song';
+    const total = updateCollectionTotal(item);
+    const playlist = getPlaylist(item);
+    const action = status === 'downloaded' ? 'Finished' : 'Failed';
+    const log = status === 'downloaded' ? console.log : console.warn;
+
+    if (total) {
+      log(`[download] ${action} song ${finishedItemCount} of ${total}${playlist ? ` (${playlist})` : ''}: ${title}`);
+    } else if (playlist) {
+      log(`[download] ${action} song ${finishedItemCount} (${playlist}; album total unavailable): ${title}`);
+    } else {
+      log(`[download] ${action} song ${finishedItemCount}: ${title}`);
+    }
+  }
+
+  function record(status, item, details = {}) {
+    const isDownloaded = status === 'downloaded';
+    const statusCode = isDownloaded
+      ? 0
+      : Number.isInteger(details.processExitCode) && details.processExitCode > 0
+        ? details.processExitCode
+        : 1;
+
+    const entry = {
+      datetime: new Date().toISOString(),
+      url: firstNonEmpty(item.url, requestUrl),
+      status,
+      statusCode,
+      playlist: getPlaylist(item),
+      album: firstNonEmpty(item.album, album),
+      title: firstNonEmpty(item.title, requestData.name),
+      file: item.filePath || null
+    };
+
+    if (details.processExitCode !== undefined) {
+      entry.processExitCode = details.processExitCode;
+    }
+    if (details.signal) {
+      entry.signal = details.signal;
+    }
+    if (details.error) {
+      entry.error = details.error;
+    }
+
+    appendDownloadLog(entry);
+  }
+
+  function findPendingItem(event) {
+    return pendingItems.find(item => {
+      if (item.completed) return false;
+      if (event.url && item.url === event.url) return true;
+      if (event.id && item.id === event.id) return true;
+      return Boolean(event.title && item.title && event.title === item.title);
+    });
+  }
+
+  function handleEvent(event) {
+    if (!event) return false;
+    sawEvent = true;
+
+    if (event.type === 'before') {
+      pendingItems.push(Object.assign({ completed: false }, event));
+      return true;
+    }
+
+    if (event.type !== 'after') return true;
+
+    const pendingItem = findPendingItem(event);
+    const key = eventKey(event);
+    if (!pendingItem && key && completedKeys.has(key)) {
+      // Some yt-dlp options can emit more than one after_move notification for
+      // the same item. Log one result per downloaded item rather than duplicates.
+      return true;
+    }
+
+    const item = pendingItem ? Object.assign({}, pendingItem, event) : event;
+    if (pendingItem) pendingItem.completed = true;
+    if (key) completedKeys.add(key);
+    completedCount += 1;
+    finishedItemCount += 1;
+    record('downloaded', item);
+    logItemProgress('downloaded', item);
+    return true;
+  }
+
+  function handleStdout(chunk) {
+    const text = stdoutRemainder + chunk.toString('utf8');
+    const lines = text.split(/\r?\n/);
+    stdoutRemainder = lines.pop() || '';
+    lines.forEach(line => {
+      if (line) handleEvent(parseYtDlpEventLine(line));
+    });
+  }
+
+  function flushStdout() {
+    if (!stdoutRemainder) return;
+    handleEvent(parseYtDlpEventLine(stdoutRemainder));
+    stdoutRemainder = '';
+  }
+
+  function handleStderr(chunk) {
+    const text = chunk.toString('utf8');
+    const errorLines = text
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => /\bERROR\b/i.test(line));
+
+    if (errorLines.length) {
+      latestError = errorLines[errorLines.length - 1].slice(0, 500);
+    }
+  }
+
+  function finish(processExitCode, signal) {
+    if (finished) return;
+    flushStdout();
+    finished = true;
+
+    const failureDetails = {
+      processExitCode,
+      signal,
+      error: latestError
+    };
+
+    pendingItems
+      .filter(item => !item.completed)
+      .forEach(item => {
+        finishedItemCount += 1;
+        record('failed', item, failureDetails);
+        logItemProgress('failed', item);
+      });
+
+    if (!sawEvent || (pendingItems.length === 0 && completedCount === 0)) {
+      record(
+        'failed',
+        {
+          url: requestUrl,
+          title: requestData.name,
+          playlistTitle: fallbackPlaylist,
+          album
+        },
+        failureDetails
+      );
+      finishedItemCount += 1;
+      logItemProgress('failed', {
+        url: requestUrl,
+        title: requestData.name,
+        playlistCount: collectionTotal,
+        playlistTitle: fallbackPlaylist,
+        album
+      });
+    }
+  }
+
+  function fail(error) {
+    latestError = error && error.message ? error.message.slice(0, 500) : String(error);
+  }
+
+  return { handleEvent, handleStdout, handleStderr, finish, fail };
 }
 
 function normalizeSavePath(value) {
@@ -265,6 +558,8 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => (body += chunk));
     req.on('end', () => {
       (async () => {
+        let downloadTracker = null;
+
         try {
           const data = body ? JSON.parse(body) : {};
           console.log('[download] received:', data);
@@ -288,6 +583,20 @@ const server = http.createServer((req, res) => {
             savePathOverrideRaw,
             isSingle
           });
+          const fallbackPlaylist = getFallbackPlaylist({
+            url,
+            data,
+            nameRaw,
+            albumRaw,
+            albumOverrideRaw
+          });
+
+          downloadTracker = createDownloadTracker({
+            requestUrl: url,
+            requestData: data,
+            album: firstNonEmpty(albumOverrideRaw, albumRaw),
+            fallbackPlaylist
+          });
 
           // Construct target directory and ensure it exists
           await fs.promises.mkdir(targetDir, { recursive: true });
@@ -299,25 +608,33 @@ const server = http.createServer((req, res) => {
             ? path.join(targetDir, `${titleOverride.replace(/%/g, '%%')}.%(ext)s`)
             : null;
           const outputArgs = outputTemplate ? ['--output', outputTemplate] : [];
-          const args = ['-P', targetDir, ...extraArgs, ...outputArgs, url];
+          const monitoringArgs = getDownloadMonitoringArgs();
+          const args = ['-P', targetDir, ...extraArgs, ...outputArgs, ...monitoringArgs, url];
 
           console.log('[download] spawning:', YTDLP_PATH, args);
 
-          let childInfo = { forwarded: false };
+          // Keep stdout/stderr attached to the backend so yt-dlp's structured
+          // before_dl/after_move events can be used to log each item.
+          const child = spawn(YTDLP_PATH, args, {
+            detached: true,
+            stdio: ['ignore', 'pipe', 'pipe']
+          });
+          child.stdout.on('data', chunk => downloadTracker.handleStdout(chunk));
+          child.stderr.on('data', chunk => {
+            downloadTracker.handleStderr(chunk);
+            process.stderr.write(chunk);
+          });
+          child.on('error', err => {
+            downloadTracker.fail(err);
+            downloadTracker.finish(null, null);
+            console.warn('yt-dlp process error', err);
+          });
+          child.on('close', (code, signal) => {
+            downloadTracker.finish(code, signal);
+          });
+          child.unref();
 
-          if (process.platform === 'win32') {
-            // Use cmd.exe start to open a new terminal window per request so output is visible and non-blocking
-            // 'start' treats the first quoted string as window title, so pass an empty title "".
-            const startArgs = ['/c', 'start', '""', YTDLP_PATH, ...args];
-            const child = spawn('cmd.exe', startArgs, { detached: true, stdio: 'ignore' });
-            child.unref();
-            childInfo = { forwarded: true, terminal: 'windows', pid: child.pid };
-          } else {
-            // Fallback: spawn detached and inherit stdio (may forward to server terminal)
-            const child = spawn(YTDLP_PATH, args, { detached: true, stdio: 'inherit' });
-            child.unref();
-            childInfo = { forwarded: true, terminal: 'same', pid: child.pid };
-          }
+          const childInfo = { forwarded: true, terminal: 'backend', pid: child.pid };
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(Object.assign({
@@ -333,6 +650,10 @@ const server = http.createServer((req, res) => {
             cmd: `${YTDLP_PATH} ${args.map(v => JSON.stringify(v)).join(' ')}`
           }, childInfo)));
         } catch (err) {
+          if (downloadTracker) {
+            downloadTracker.fail(err);
+            downloadTracker.finish(null, null);
+          }
           console.warn('Failed to handle download', err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ status: 'error', error: String(err) }));
