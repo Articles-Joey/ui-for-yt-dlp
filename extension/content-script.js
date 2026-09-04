@@ -4,6 +4,7 @@
   let ENDPOINT = 'http://localhost:3060/download';
   let CHECK_ENDPOINT = 'http://localhost:3060/check';
   let OPEN_PATH_ENDPOINT = 'http://localhost:3060/open-path';
+  let STATS_ENDPOINT = 'http://localhost:3060/stats';
   const MORE_BUTTON_ID = 'ytm-more-button';
   const INFO_BUTTON_ID = 'ytm-info-button';
   let INFO_LINK = 'https://github.com/Articles-Joey/ui-for-yt-dlp';
@@ -19,6 +20,7 @@
       if (cfg.endpoint) ENDPOINT = cfg.endpoint;
       if (cfg.checkEndpoint) CHECK_ENDPOINT = cfg.checkEndpoint;
       if (cfg.openPathEndpoint) OPEN_PATH_ENDPOINT = cfg.openPathEndpoint;
+      if (cfg.statsEndpoint) STATS_ENDPOINT = cfg.statsEndpoint;
       if (cfg.infoLink) INFO_LINK = cfg.infoLink;
     } catch (e) {
       console.warn('Could not fetch config from server', e);
@@ -100,6 +102,250 @@
     const resp = await fetch(`${OPEN_PATH_ENDPOINT}?${params.toString()}`);
     if (!resp.ok) throw new Error('Non-OK response: ' + resp.status);
     return resp.json();
+  }
+
+  async function fetchDownloadStats(limit = 20) {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+
+    const resp = await fetch(`${STATS_ENDPOINT}?${params.toString()}`);
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      throw new Error((data && data.error) || `Non-OK response: ${resp.status}`);
+    }
+    return data || {};
+  }
+
+  function formatStatsDate(value) {
+    if (!value) return 'Unknown time';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  }
+
+  function showStatsModal() {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(0, 0, 0, 0.45)';
+      overlay.style.zIndex = '2147483647';
+      overlay.style.display = 'flex';
+      overlay.style.flexDirection = 'column';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.padding = '16px';
+      overlay.style.gap = '10px';
+
+      const card = document.createElement('div');
+      card.style.width = '100%';
+      card.style.maxWidth = '520px';
+      card.style.maxHeight = '80vh';
+      card.style.overflowY = 'auto';
+      card.style.background = '#1f1f1f';
+      card.style.color = '#fff';
+      card.style.border = '1px solid #3f3f3f';
+      card.style.borderRadius = '10px';
+      card.style.padding = '14px';
+      card.style.boxSizing = 'border-box';
+      card.style.fontFamily = 'Arial, sans-serif';
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.alignItems = 'center';
+      header.style.justifyContent = 'space-between';
+      header.style.gap = '8px';
+      header.style.marginBottom = '12px';
+
+      const title = document.createElement('div');
+      title.textContent = 'Download Stats';
+      title.style.fontSize = '16px';
+      title.style.fontWeight = '600';
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.textContent = 'Close';
+      closeBtn.style.padding = '6px 10px';
+      closeBtn.style.cursor = 'pointer';
+
+      const refreshBtn = document.createElement('button');
+      refreshBtn.type = 'button';
+      refreshBtn.textContent = 'Refresh';
+      refreshBtn.style.padding = '7px 10px';
+      refreshBtn.style.cursor = 'pointer';
+      refreshBtn.style.marginBottom = '12px';
+
+      const summary = document.createElement('div');
+      summary.style.display = 'grid';
+      summary.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
+      summary.style.gap = '8px';
+      summary.style.marginBottom = '16px';
+
+      const createMetric = (label, isButton) => {
+        const metric = document.createElement(isButton ? 'button' : 'div');
+        metric.style.display = 'grid';
+        metric.style.gap = '4px';
+        metric.style.width = '100%';
+        metric.style.boxSizing = 'border-box';
+        metric.style.padding = '10px';
+        metric.style.textAlign = 'left';
+        metric.style.background = '#292929';
+        metric.style.color = '#fff';
+        metric.style.border = '1px solid #464646';
+        metric.style.borderRadius = '6px';
+        if (isButton) metric.style.cursor = 'pointer';
+
+        const labelEl = document.createElement('span');
+        labelEl.textContent = label;
+        labelEl.style.fontSize = '12px';
+        labelEl.style.opacity = '0.85';
+
+        const valueEl = document.createElement('strong');
+        valueEl.textContent = '—';
+        valueEl.style.fontSize = '20px';
+
+        metric.appendChild(labelEl);
+        metric.appendChild(valueEl);
+        summary.appendChild(metric);
+        return { metric, valueEl };
+      };
+
+      const downloadedMetric = createMetric('Total songs downloaded', false);
+      const failedMetric = createMetric('Total songs failed (click to show)', true);
+
+      const createSectionTitle = text => {
+        const heading = document.createElement('div');
+        heading.textContent = text;
+        heading.style.fontSize = '13px';
+        heading.style.fontWeight = '600';
+        heading.style.marginBottom = '6px';
+        return heading;
+      };
+
+      const recentHeading = createSectionTitle('Recent downloads');
+      const recentList = document.createElement('div');
+      recentList.style.display = 'grid';
+      recentList.style.gap = '6px';
+      recentList.style.marginBottom = '16px';
+
+      const failedSection = document.createElement('div');
+      failedSection.style.display = 'none';
+      const failedHeading = createSectionTitle('Recent failed songs');
+      const failedList = document.createElement('div');
+      failedList.style.display = 'grid';
+      failedList.style.gap = '6px';
+
+      const status = document.createElement('div');
+      status.style.fontSize = '12px';
+      status.style.opacity = '0.8';
+      status.style.marginTop = '12px';
+
+      const renderEntries = (container, entries, isFailed) => {
+        container.textContent = '';
+
+        if (!Array.isArray(entries) || entries.length === 0) {
+          const empty = document.createElement('div');
+          empty.textContent = isFailed ? 'No failed songs found.' : 'No downloads found.';
+          empty.style.fontSize = '12px';
+          empty.style.opacity = '0.75';
+          container.appendChild(empty);
+          return;
+        }
+
+        entries.forEach(entry => {
+          const row = document.createElement('div');
+          row.style.padding = '8px';
+          row.style.background = '#292929';
+          row.style.border = '1px solid #414141';
+          row.style.borderRadius = '5px';
+
+          const rowTitle = document.createElement('div');
+          rowTitle.textContent = entry.title || entry.url || 'Unknown song';
+          rowTitle.style.fontSize = '12px';
+          rowTitle.style.fontWeight = '600';
+          rowTitle.style.wordBreak = 'break-word';
+
+          const metadata = document.createElement('div');
+          const metadataParts = [formatStatsDate(entry.datetime)];
+          if (entry.playlist) metadataParts.push(`Playlist: ${entry.playlist}`);
+          if (entry.statusCode !== undefined) metadataParts.push(`Code: ${entry.statusCode}`);
+          metadata.textContent = metadataParts.join(' • ');
+          metadata.style.fontSize = '11px';
+          metadata.style.opacity = '0.75';
+          metadata.style.marginTop = '4px';
+          metadata.style.wordBreak = 'break-word';
+
+          row.appendChild(rowTitle);
+          row.appendChild(metadata);
+
+          if (isFailed && entry.error) {
+            const error = document.createElement('div');
+            error.textContent = entry.error;
+            error.style.fontSize = '11px';
+            error.style.color = '#ffb3b3';
+            error.style.marginTop = '4px';
+            error.style.wordBreak = 'break-word';
+            row.appendChild(error);
+          }
+
+          container.appendChild(row);
+        });
+      };
+
+      const close = () => {
+        document.removeEventListener('keydown', onKeyDown);
+        overlay.remove();
+        resolve();
+      };
+
+      const onKeyDown = event => {
+        if (event.key === 'Escape') close();
+      };
+
+      closeBtn.addEventListener('click', close);
+      overlay.addEventListener('click', event => {
+        if (event.target === overlay) close();
+      });
+      refreshBtn.addEventListener('click', loadStats);
+      failedMetric.metric.addEventListener('click', () => {
+        failedSection.style.display = failedSection.style.display === 'none' ? 'block' : 'none';
+      });
+
+      async function loadStats() {
+        refreshBtn.disabled = true;
+        status.textContent = 'Loading stats...';
+
+        try {
+          const stats = await fetchDownloadStats(20);
+          downloadedMetric.valueEl.textContent = String(stats.totalSongsDownloaded || 0);
+          failedMetric.valueEl.textContent = String(stats.totalSongsFailed || 0);
+          renderEntries(recentList, stats.recentDownloads, false);
+          renderEntries(failedList, stats.recentFailures, true);
+          status.textContent = 'Showing the 20 most recent records.';
+        } catch (err) {
+          console.error('Failed to load download stats', err);
+          status.textContent = `Failed to load stats: ${err.message || err}`;
+        } finally {
+          refreshBtn.disabled = false;
+        }
+      }
+
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+      failedSection.appendChild(failedHeading);
+      failedSection.appendChild(failedList);
+      card.appendChild(header);
+      card.appendChild(refreshBtn);
+      card.appendChild(summary);
+      card.appendChild(recentHeading);
+      card.appendChild(recentList);
+      card.appendChild(failedSection);
+      card.appendChild(status);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      document.addEventListener('keydown', onKeyDown);
+
+      loadStats();
+    });
   }
 
   function attachClickHandler(btn) {
@@ -214,6 +460,10 @@
       if (!result || result.action === 'cancel') {
         return;
       }
+      if (result.action === 'stats') {
+        await showStatsModal();
+        return;
+      }
 
       let params = null;
       if (result.action === 'custom') {
@@ -277,9 +527,11 @@
       overlay.style.background = 'rgba(0, 0, 0, 0.45)';
       overlay.style.zIndex = '2147483647';
       overlay.style.display = 'flex';
+      overlay.style.flexDirection = 'column';
       overlay.style.alignItems = 'center';
       overlay.style.justifyContent = 'center';
       overlay.style.padding = '16px';
+      overlay.style.gap = '10px';
 
       const modal = document.createElement('div');
       modal.style.width = '100%';
@@ -449,6 +701,14 @@
       actions.style.justifyContent = 'flex-end';
       actions.style.gap = '8px';
 
+      const showStatsBtn = document.createElement('button');
+      showStatsBtn.type = 'button';
+      showStatsBtn.textContent = 'Show Stats';
+      showStatsBtn.style.width = '100%';
+      showStatsBtn.style.maxWidth = '520px';
+      showStatsBtn.style.padding = '8px 12px';
+      showStatsBtn.style.cursor = 'pointer';
+
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.textContent = 'Cancel';
@@ -490,6 +750,7 @@
         extractAudioMp3: mp3Only,
         overrides: collectOverrides()
       }));
+      showStatsBtn.addEventListener('click', () => close({ action: 'stats' }));
       toggleSingleQuickAction.addEventListener('click', () => {
         isSingle = !isSingle;
         toggleSingleQuickAction.textContent = `Toggle Is Single: ${isSingle ? 'On' : 'Off'}`;
@@ -571,6 +832,7 @@
       modal.appendChild(actions);
 
       overlay.appendChild(modal);
+      overlay.appendChild(showStatsBtn);
       document.body.appendChild(overlay);
       document.addEventListener('keydown', onKeyDown);
 

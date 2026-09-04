@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const readline = require('readline');
 
 const projectConfig = require('../config');
 
@@ -13,6 +14,7 @@ const UI_HTML_PATH = path.join(__dirname, 'ui.html');
 const ICON_128_PATH = path.join(__dirname, '..', 'extension', 'icons', 'icon_128.png');
 const DOWNLOAD_LOG_PATH = path.join(__dirname, '..', 'ui-for-yt-dlp.log');
 const DOWNLOAD_EVENT_MARKER = '__UI_FOR_YTDLP_DOWNLOAD_EVENT__';
+const MAX_STATS_LIMIT = 100;
 const DOWNLOAD_EVENT_FIELDS = [
   '%(webpage_url|)j',
   '%(title|)j',
@@ -32,6 +34,7 @@ const DEFAULT_YTDLP_PARAMS = {
 };
 
 let downloadLogQueue = Promise.resolve();
+let downloadStatsCache = null;
 
 function toYtDlpArgsFromObject(params = {}) {
   const args = [];
@@ -78,6 +81,9 @@ function firstNonEmpty(...values) {
 function appendDownloadLog(entry) {
   const line = `${JSON.stringify(entry)}${os.EOL}`;
 
+  // Any completed append makes a previously calculated stats snapshot stale.
+  downloadStatsCache = null;
+
   // Serialize writes so simultaneous album/playlist requests cannot interleave
   // JSON lines in the log file.
   downloadLogQueue = downloadLogQueue
@@ -87,6 +93,78 @@ function appendDownloadLog(entry) {
     });
 
   return downloadLogQueue;
+}
+
+function keepRecentItem(items, item, limit) {
+  items.push(item);
+  if (items.length > limit) items.shift();
+}
+
+async function readDownloadStats() {
+  let fileStat = null;
+
+  try {
+    fileStat = await fs.promises.stat(DOWNLOAD_LOG_PATH);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+
+  const cacheKey = fileStat ? `${fileStat.size}:${fileStat.mtimeMs}` : 'missing';
+  if (downloadStatsCache && downloadStatsCache.cacheKey === cacheKey) {
+    return downloadStatsCache.stats;
+  }
+
+  const stats = {
+    totalSongsDownloaded: 0,
+    totalSongsFailed: 0,
+    recentDownloads: [],
+    recentFailures: []
+  };
+
+  if (fileStat) {
+    const input = fs.createReadStream(DOWNLOAD_LOG_PATH, { encoding: 'utf8' });
+    const lines = readline.createInterface({ input, crlfDelay: Infinity });
+
+    try {
+      for await (const line of lines) {
+        if (!line.trim()) continue;
+
+        let entry;
+        try {
+          entry = JSON.parse(line);
+        } catch (err) {
+          // Ignore incomplete/corrupt lines so one bad entry cannot break stats.
+          continue;
+        }
+
+        if (entry.status === 'downloaded') {
+          stats.totalSongsDownloaded += 1;
+          keepRecentItem(stats.recentDownloads, entry, MAX_STATS_LIMIT);
+        } else if (entry.status === 'failed') {
+          stats.totalSongsFailed += 1;
+          keepRecentItem(stats.recentFailures, entry, MAX_STATS_LIMIT);
+        }
+      }
+    } finally {
+      lines.close();
+    }
+  }
+
+  downloadStatsCache = { cacheKey, stats };
+  return stats;
+}
+
+async function getDownloadStatsResponse(limit) {
+  const stats = await readDownloadStats();
+  const statsLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), MAX_STATS_LIMIT);
+
+  return {
+    status: 'ok',
+    totalSongsDownloaded: stats.totalSongsDownloaded,
+    totalSongsFailed: stats.totalSongsFailed,
+    recentDownloads: stats.recentDownloads.slice(-statsLimit).reverse(),
+    recentFailures: stats.recentFailures.slice(-statsLimit).reverse()
+  };
 }
 
 function isCollectionUrl(rawUrl) {
@@ -445,6 +523,7 @@ const server = http.createServer((req, res) => {
       endpoint: `http://localhost:${PORT}/download`,
       checkEndpoint: `http://localhost:${PORT}/check`,
       openPathEndpoint: `http://localhost:${PORT}/open-path`,
+      statsEndpoint: `http://localhost:${PORT}/stats`,
       infoLink: projectConfig.INFO_LINK || 'https://github.com/Articles-Joey/ui-for-yt-dlp'
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -481,6 +560,22 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok' }));
     });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/stats')) {
+    (async () => {
+      try {
+        const parsed = new URL(req.url, `http://localhost:${PORT}`);
+        const stats = await getDownloadStatsResponse(parsed.searchParams.get('limit'));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(stats));
+      } catch (err) {
+        console.warn('Failed to read download stats', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'error', error: String(err) }));
+      }
+    })();
     return;
   }
 
